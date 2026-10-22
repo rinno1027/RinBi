@@ -391,3 +391,11 @@ agent:
 
 管理员接口会在 `AdminService` 中再次校验 `ADMIN` 角色，不能仅靠隐藏前端入口绕过。禁用账号会调用 `AuthService.revokeUserSessions` 立即吊销该用户全部在线 token。用户与数据源列表统一返回 `{ items, total, page, size }` 分页结构，`size` 最大为 100。
 
+## 应用截图
+<img width="1894" height="876" alt="ScreenShot_2026-10-22_150247_052" src="https://github.com/user-attachments/assets/283b792a-65dc-4877-830a-b49aadfefd0a" />
+
+<img width="1898" height="874" alt="ScreenShot_2026-10-22_153824_957" src="https://github.com/user-attachments/assets/fdd7e11f-43e1-46c1-99b2-c83ec03c0fad" />
+
+<img width="1915" height="870" alt="ScreenShot_2026-10-22_150400_986" src="https://github.com/user-attachments/assets/a41c69d6-2b98-4f0d-ac97-759b3a0212b8" />
+
+
