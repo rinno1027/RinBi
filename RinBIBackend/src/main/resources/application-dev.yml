@@ -1,0 +1,163 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    tomcat:
+      connection-timeout: 180000
+      request-timeout: 300000
+      max-threads: 800
+
+spring:
+  jackson:
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+  # ============================================================
+  # 元数据库：用户、全局数据源、授权关系、历史对话全部保存在本地 MySQL 8.0 的 rinbidb 库
+  # createDatabaseIfNotExist=true 会在首次启动时自动创建数据库
+  # 生产环境请通过环境变量覆盖账号密码，不要提交真实密码
+  # ============================================================
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${RINBI_DB_URL:jdbc:mysql://localhost:3306/rinbidb?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    username: ${RINBI_DB_USERNAME:root}
+    password: ${RINBI_DB_PASSWORD:root123}
+    hikari:
+      pool-name: rinbi-metadata
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  # 启动时执行幂等建表脚本；表结构见 src/main/resources/db/rinbidb-schema.sql
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/rinbidb-schema.sql
+      encoding: UTF-8
+      continue-on-error: false
+  # 开发期热部署：target/classes 变化后自动重启；静态资源变更通过 LiveReload 刷新浏览器
+  devtools:
+    restart:
+      enabled: true
+    livereload:
+      enabled: true
+
+# MyBatis-Plus：元数据库表使用下划线命名，实体使用驼峰命名
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+#日志配置
+logging:
+  config: classpath:logback-dev.xml
+
+
+# ============================================================
+# Agent 配置：模型、SQL 安全策略、多数据库连接
+# 所有敏感信息建议通过环境变量注入，不要把生产密码提交到仓库
+# ============================================================
+agent:
+  llm:
+    # 目前使用 OpenAI 兼容协议，可对接 DeepSeek / Qwen / OpenAI 等
+    provider: openai-compatible
+    base-url: ${LLM_BASE_URL:https://api.deepseek.com}
+    api-key: ${LLM_API_KEY:your-api-key}
+    model-name: ${LLM_MODEL_NAME:deepseek-flash}
+    # 结果整理阶段使用的模型，思考过程会通过 reasoning 事件流式下发；
+    # 留空时回退到 model-name。新版本 DeepSeek 可直接使用 deepseek-flash，
+    # 思考模式由下方的 thinking-type 控制（旧的 deepseek-chat / deepseek-reasoner 已逐步下线）。
+    reasoning-model-name: ${LLM_REASONING_MODEL_NAME:deepseek-flash}
+    # 推理强度（DeepSeek: low / high / max），仅对支持 reasoning_effort 的模型生效；
+    # 留空则不下发该参数，由服务端默认值决定。
+    reasoning-effort: ${LLM_REASONING_EFFORT:}
+    # 思考模式开关：写入请求体 thinking.type，DeepSeek 支持 enabled / disabled。
+    # 注意：LangChain4j 的 return-thinking 只负责解析响应中的 reasoning_content，不会下发请求参数，
+    # 因此开启思考模式必须依赖本配置。留空则不发送该字段；非 DeepSeek 服务请留空，避免未知参数报错。
+    thinking-type: ${LLM_THINKING_TYPE:enabled}
+    temperature: 0.2
+    max-tokens: 8000
+    timeout-seconds: 300
+    max-retries: 2
+    log-requests: true
+    log-responses: false
+    return-thinking: true
+    # 本地 Ollama 模型（仅在需要流式本地模型时使用）
+    ollama:
+      enabled: false
+      base-url: ${OLLAMA_BASE_URL:}
+      model-name: ${OLLAMA_MODEL_NAME:}
+
+  sql:
+    # 单次查询结果允许返回的最大字符数（硬性限制）
+    max-result-chars: 30000
+    # 单次查询最多读取的行数，超过后标记 truncated
+    max-rows: 500
+    # JDBC 查询超时（秒）
+    query-timeout-seconds: 30
+    # 提供给模型的 schema 最大字符数
+    max-schema-chars: 30000
+    # 可执行sql的最大字符数
+    max-sql-length: 20000
+    # schema 元数据缓存时间（秒）
+    schema-cache-seconds: 300
+    # 瞬时数据库异常重试次数与退避时间
+    retry-max-attempts: 3
+    retry-backoff-millis: 500
+    # 交给模型整理的数据行数/字符数上限（完整数据仍通过结构化 table 返回前端）
+    format-row-limit: 100
+    format-max-chars: 18000
+    # 是否在响应中返回实际执行的 SQL。SQL 包含真实表名/字段名，
+    # 默认关闭以隐藏库表结构（前端将不展示 SQL）；确有调试需要时再设为 true
+    expose-sql: true
+
+  memory:
+    # 每个会话保留的最近问答轮数
+    max-exchanges: 6
+    # 会话内存过期时间（分钟）
+    ttl-minutes: 60
+    # 每轮对话中回答能保留的最大字符数，超过部分用...代替
+    max-stored-answer-chars: 4000
+
+  web:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+
+  # 流式对话专用线程池（SSE 请求处理）：核心/最大线程数、队列与线程命名
+  # 队列与线程都打满时会拒绝新任务，可据此判断是否需要扩容
+  stream:
+    core-pool-size: 8
+    max-pool-size: 32
+    # 任务队列容量；<=0 表示不排队（SynchronousQueue），直接扩容到最大线程数
+    queue-capacity: 100
+    # 非核心线程空闲存活时间（秒）
+    keep-alive-seconds: 60
+    thread-name-prefix: agent-stream-
+    daemon: true
+
+  # ============================================================
+  # 登录与权限
+  # 说明：查询用数据库不再写在配置文件里，而是保存到 rinbidb 的
+  # data_source 表，并通过 user_data_source 中间表按用户授权；
+  # 用户只能看到/使用已授权的数据源。
+  # ============================================================
+  auth:
+    # 登录 token 有效期（分钟），默认 12 小时
+    token-ttl-minutes: ${RINBI_TOKEN_TTL_MINUTES:720}
+  security:
+    # 数据源密码的加密密钥（AES-256-GCM），生产环境必须通过环境变量覆盖
+    # 更换密钥后，历史数据需要重新录入数据源密码
+    secret: ${RINBI_SECRET:rinbi-local-dev-secret}
+  bootstrap:
+    # 首次启动时初始化默认管理员与演示数据源；生产环境建议关闭
+    enabled: ${RINBI_BOOTSTRAP_ENABLED:true}
+    admin-username: ${RINBI_ADMIN_USERNAME:admin}
+    admin-password: ${RINBI_ADMIN_PASSWORD:admin123}
+    admin-display-name: 管理员
+    # 为管理员创建 H2 内存演示库（全局数据源不存在时创建，未授权时补建授权）
+    demo-datasource-enabled: true

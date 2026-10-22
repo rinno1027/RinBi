@@ -1,0 +1,345 @@
+/* ---------------- 登录页 ---------------- */
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.login-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 32px 18px;
+  background:
+    radial-gradient(900px 500px at 8% -10%, rgba(79, 142, 247, 0.18), transparent 60%),
+    radial-gradient(800px 500px at 100% 0%, rgba(45, 212, 191, 0.12), transparent 55%),
+    var(--page);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 30px 30px 24px;
+  border: 1px solid rgba(226, 233, 243, 0.9);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-md);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.login-mark {
+  flex-shrink: 0;
+}
+
+.login-brand-text h1 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.login-brand-text p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.login-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 22px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.login-mode-switch button {
+  padding: 8px 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.login-mode-switch button.active {
+  background: #ffffff;
+  color: var(--brand-deep);
+  box-shadow: 0 3px 10px rgba(23, 42, 78, 0.08);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.login-error {
+  margin: 0;
+}
+
+.login-button {
+  width: 100%;
+  margin-top: 2px;
+  letter-spacing: 0.18em;
+}
+
+.login-hint {
+  margin: 20px 0 0;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.login-hint code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------------- 头部用户信息 ---------------- */
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 11px 5px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(236, 244, 255, 0.9);
+  font-size: 12px;
+}
+
+.user-avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #a9e9ff 0%, #60c6ff 60%, #7cf0d2 100%);
+  color: #06182f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.user-name {
+  overflow: hidden;
+  max-width: 130px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(240, 246, 255, 0.72);
+  font-size: 12px;
+  transition: background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+
+.logout-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.logout-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.admin-toggle-button {
+  padding: 8px 13px;
+  border: 1px solid rgba(124, 240, 210, 0.32);
+  border-radius: 10px;
+  background: rgba(83, 211, 184, 0.12);
+  color: #a6f5e2;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.admin-toggle-button:hover,
+.admin-toggle-button.active {
+  border-color: rgba(124, 240, 210, 0.6);
+  background: rgba(83, 211, 184, 0.24);
+  color: #eafffa;
+}
+
+/* ---------------- 历史对话 ---------------- */
+.panel-refresh {
+  margin-bottom: 12px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--brand);
+  font-size: 11px;
+}
+
+.panel-refresh:hover:not(:disabled) {
+  background: var(--brand-soft);
+}
+
+.panel-refresh:disabled {
+  cursor: not-allowed;
+  color: var(--ink-faint);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 250px;
+  margin: 0;
+  padding: 0 2px 0 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.history-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: var(--surface-soft);
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.history-item:hover {
+  border-color: #c9d9f7;
+  background: var(--brand-soft);
+}
+
+.history-item.active {
+  border-color: #b7cdf5;
+  background: var(--brand-soft);
+}
+
+.history-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  text-align: left;
+}
+
+.history-main:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.history-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+}
+
+.history-delete {
+  width: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.history-delete:hover:not(:disabled) {
+  background: rgba(226, 74, 74, 0.1);
+  color: #cf3f3f;
+}
+
+.history-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.history-empty {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  /* 移动端侧栏只保留数据源与历史对话两个面板。 */
+  .side-panel .panel-card.history-card {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .side-panel .history-card .panel-title-row {
+    display: flex;
+  }
+
+  .history-card .history-list {
+    max-height: 168px;
+  }
+}
+
+@media (max-width: 640px) {
+  .user-name {
+    display: none;
+  }
+
+  .user-chip {
+    padding: 4px;
+  }
+
+  .admin-toggle-button {
+    padding: 7px 9px;
+    font-size: 11px;
+  }
+
+  .login-card {
+    padding: 24px 20px 20px;
+  }
+}

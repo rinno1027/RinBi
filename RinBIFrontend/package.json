@@ -1,0 +1,27 @@
+{
+  "name": "rinbi-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RinBI 数据问答助手前端（Vue 3 + Vite + Element Plus）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "dompurify": "2.4.7",
+    "echarts": "5.4.3",
+    "element-plus": "2.2.36",
+    "html2pdf.js": "^0.10.1",
+    "markdown-it": "12.3.2",
+    "vue": "3.2.47"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "2.3.4",
+    "vite": "2.9.18"
+  },
+  "engines": {
+    "node": ">=14.16.0"
+  }
+}

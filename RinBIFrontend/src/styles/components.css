@@ -1,0 +1,580 @@
+/* ---------------- Markdown answer ---------------- */
+.markdown-body {
+  color: #2a3850;
+  font-size: 14px;
+  line-height: 1.78;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* 流式输出光标：挂在最后一个 Markdown 块末尾，随 token 增长。 */
+.markdown-body.is-streaming > :last-child::after {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: #4f7fe8;
+  vertical-align: -2px;
+  content: "";
+  animation: stream-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes stream-cursor-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 首个 token 到达前的等待提示 */
+.stream-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---------------- Reasoning trace ---------------- */
+.reasoning-block {
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid #e4eaf4;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff, #f4f8fe);
+}
+
+.reasoning-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #5a6c86;
+  font-size: 11.5px;
+}
+
+.reasoning-toggle:hover {
+  color: var(--brand);
+}
+
+.reasoning-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #9aa7ba;
+  font-size: 11px;
+}
+
+.reasoning-state .typing-dots i {
+  width: 4px;
+  height: 4px;
+}
+
+.reasoning-text {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  border-top: 1px solid #e8edf5;
+  color: #5c6b82;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scrollbar-width: thin;
+}
+
+.reasoning-text.is-streaming {
+  border-top-color: #dbe7fa;
+}
+
+.markdown-body p {
+  margin: 0 0 11px;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 20px 0 10px;
+  color: var(--ink-strong);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.markdown-body h1 {
+  font-size: 20px;
+}
+
+.markdown-body h2 {
+  font-size: 18px;
+}
+
+.markdown-body h3 {
+  font-size: 15.5px;
+}
+
+.markdown-body h4 {
+  font-size: 14px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 8px 0 12px;
+  padding-left: 22px;
+}
+
+.markdown-body li {
+  margin: 4px 0;
+}
+
+.markdown-body li::marker {
+  color: #85a7dd;
+}
+
+.markdown-body strong {
+  color: #1b2a44;
+  font-weight: 650;
+}
+
+.markdown-body a {
+  color: var(--brand);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(47, 111, 237, 0.25);
+}
+
+.markdown-body a:hover {
+  border-bottom-color: var(--brand);
+}
+
+.markdown-body blockquote {
+  margin: 14px 0;
+  padding: 8px 14px;
+  border-left: 3px solid #b9d0f5;
+  border-radius: 0 8px 8px 0;
+  background: #f5f9ff;
+  color: var(--ink-soft);
+}
+
+.markdown-body code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: #eff3f9;
+  color: #29529b;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.markdown-body pre {
+  overflow-x: auto;
+  margin: 12px 0;
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: #0f1c33;
+  color: #d8e6ff;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.markdown-body table {
+  width: 100%;
+  margin: 14px 0;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 8px 10px;
+  border: 1px solid #e3e9f3;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-body th {
+  background: #f4f7fc;
+  color: #4f5f78;
+  font-weight: 600;
+}
+
+.markdown-body tr:nth-child(even) td {
+  background: #fbfcfe;
+}
+
+.markdown-body hr {
+  margin: 18px 0;
+  border: none;
+  border-top: 1px dashed var(--line);
+}
+
+/* ---------------- SQL trace ---------------- */
+.sql-block {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid #e4eaf4;
+  border-radius: 12px;
+  background: #f8fafd;
+}
+
+.sql-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.sql-toggle,
+.sql-copy {
+  border: none;
+  background: transparent;
+  color: #5a6c86;
+  font-size: 11.5px;
+}
+
+.sql-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+
+.sql-toggle:hover,
+.sql-copy:hover {
+  color: var(--brand);
+}
+
+.chevron {
+  display: inline-block;
+  color: #96a5ba;
+  font-size: 15px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.18s ease;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+.sql-copy {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #e4eaf4;
+}
+
+.sql-code {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  border-top: 1px solid #e8edf5;
+  background: #0f1c33;
+  color: #cfe0fb;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------------- Alerts ---------------- */
+.reason-alert,
+.warning-alert {
+  margin: 0 0 12px;
+}
+
+.reason-alert .el-alert__description {
+  margin-top: 3px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.warning-alert .el-alert__title {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.agent-card > .el-alert:first-child {
+  margin-top: 2px;
+}
+
+/* ---------------- Result table ---------------- */
+.result-block {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid #e4eaf4;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  border-bottom: 1px solid #e4eaf4;
+  background: #f8fafd;
+}
+
+.result-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #3d4e68;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.result-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5fb99e;
+  box-shadow: 0 0 0 3px rgba(95, 185, 158, 0.14);
+}
+
+.result-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-table {
+  width: 100%;
+  --el-table-border-color: #eef1f7;
+  --el-table-header-bg-color: #f6f8fc;
+  --el-table-row-hover-bg-color: #f3f8ff;
+  font-size: 12px;
+}
+
+.result-table .el-table__header th {
+  background: #f6f8fc;
+  color: #5a6a82;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.result-table .el-table__cell {
+  padding: 6px 0;
+}
+
+.result-table .cell {
+  color: #334159;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 9px 12px;
+  border-top: 1px solid #eef1f7;
+  background: #fbfcfe;
+}
+
+.result-pagination .el-pagination {
+  --el-pagination-font-size: 11.5px;
+}
+
+/* ---------------- Charts ---------------- */
+.chart-block {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.chart-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e4eaf4;
+  border-radius: 13px;
+  background: #fff;
+}
+
+/* 奇数个图表时最后一个占满整行，避免最后一张孤立在半宽列。 */
+.chart-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  border-bottom: 1px solid #eef2f8;
+  background: #f8fafd;
+}
+
+.chart-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  color: #3d4e68;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chart-title > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4f7fe8;
+  box-shadow: 0 0 0 3px rgba(79, 127, 232, 0.14);
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 320px;
+}
+
+@media (max-width: 640px) {
+  .chart-block {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-canvas {
+    height: 250px;
+  }
+}
+
+/* ---------------- PDF export ---------------- */
+.answer-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.answer-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid #e1e8f3;
+  border-radius: 8px;
+  background: #fff;
+  color: #5a6c86;
+  font-size: 11.5px;
+  line-height: 1.4;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.answer-action-button:hover:not(:disabled) {
+  border-color: #b9cff3;
+  background: #f7faff;
+  color: var(--brand);
+}
+
+.answer-action-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.answer-action-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 仅供 html2pdf 克隆渲染，宽度跟随 A4 版心（190mm）自适应。 */
+.pdf-export-document {
+  width: 100%;
+  padding: 2px 1px;
+  background: #fff;
+  color: #2a3850;
+  font-family: var(--el-font-family);
+}
+
+.pdf-export-document .markdown-body {
+  font-size: 13.5px;
+}
+
+/* 图表在 PDF 中单列铺满版心，保证坐标轴与图例文字清晰可读。 */
+.pdf-export-document .chart-block {
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.pdf-export-document .chart-title > span:last-child {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.pdf-export-document .chart-card,
+.pdf-export-document .markdown-body pre,
+.pdf-export-document .markdown-body table,
+.pdf-export-document .markdown-body blockquote,
+.pdf-export-document .markdown-body img {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* PDF 中代码块需要完整换行展示，避免横向滚动导致内容被裁切。 */
+.pdf-export-document .markdown-body pre {
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pdf-chart-type {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid #e1e8f3;
+  border-radius: 5px;
+  background: #f6f8fc;
+  color: #7b8aa3;
+  font-size: 10.5px;
+}
+
+.pdf-chart-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 8px 10px 10px;
+}
+
