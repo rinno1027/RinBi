@@ -177,3 +177,56 @@ npm run preview
 - 登录态存放在 `localStorage`，XSS 可读取；生产环境应启用 CSP 并保持 Markdown/HTML 清洗。
 
 登录、历史与问答接口的完整说明见后端 README 的「HTTP API」章节。
+
+## 核心交互流程
+
+### 首次加载
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant F as 前端
+    participant B as 后端
+    F->>B: GET /api/agent/health
+    F->>B: GET /api/agent/databases
+    B-->>F: status=UP / 数据源列表
+    F->>F: 校验 localStorage 中的数据源是否仍存在
+    F-->>U: 显示“服务在线”，渲染空状态与示例
+```
+
+两个请求使用 `Promise.allSettled`，任一失败都不阻塞页面：页面顶部显示可关闭的警告，数据源列表为空时 Select 禁用。
+
+### 提问
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant F as 前端
+    participant B as 后端
+    U->>F: 输入问题并发送
+    F->>F: 立即插入用户消息，清空输入框
+    F->>F: 显示 typing 指示与已耗时秒数
+    F->>B: POST /api/agent/chat {question, database?, conversationId?}
+    B-->>F: event: meta（会话、数据源、SQL、结构化结果）
+    B-->>F: event: reasoning（思考过程分片，可连续多条）
+    B-->>F: event: token（答案分片，可连续多条）
+    B-->>F: event: done（完整 ChatResponse，含 answer、reasoning 与 charts）
+    F->>F: 逐片追加 answer，实时渲染 Markdown
+    F->>F: 原地更新占位消息，保存 conversationId 到 localStorage
+    F-->>U: 折叠展示思考过程，同时流式渲染答案，随后补齐状态标签、元信息、SQL、表格
+    Note over F,B: 网络错误 / 超时 → 插入错误消息气泡
+```
+
+- `database` 为空字符串时不发送该字段，由后端自动选库。
+- 首次请求不发送 `conversationId`，由后端创建并返回。
+- 响应为 SSE：`meta` 先到，`reasoning` 与 `token` 都可连续多条，`done` 携带完整答案；答案以 token 分片增量下发，`done` 到达后以完整文本覆盖。
+- 同一时间只允许一个请求：`sending` 为真时输入框与发送按钮禁用。
+- 点击示例问题只填入输入框并聚焦，不自动发送，避免误触。
+
+### 清空会话
+
+1. 有消息或会话 ID 时才启用按钮；
+2. `ElMessageBox.confirm` 二次确认；
+3. 立即清空本地消息与 `conversationId`；
+4. 若存在服务端 ID，调用 `DELETE /api/agent/conversations/{id}`；
+5. 删除失败只提示“本地已清空，服务端清理失败”，不恢复旧消息。
