@@ -1,4 +1,7 @@
 # RinBi
+
+English module docs: [Frontend](RinBIFrontend/README.en.md) | [Backend](RinBIBackend/README.en.md)
+
 这是一款基于 Spring Boot 的多数据源 LLM 查询 Agent。用户用自然语言提问，后端自动读取数据库 Schema、生成只读 SQL、经过安全校验后执行，并返回 Markdown 分析结果与结构化数据表格。前端位于同级 `RinBIFrontend` 仓库。
 安全定位：这是一个**只读分析助手**，不是通用 SQL 执行器。所有查询都必须经过 `SqlGuard`，非 `SELECT` / `WITH ... SELECT` 语句会被拒绝。
 
