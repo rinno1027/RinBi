@@ -1,0 +1,112 @@
+/* ---------------- 统计规则管理 ---------------- */
+.rules-page .admin-toolbar-hint {
+  max-width: min(100%, 760px);
+}
+
+.rule-source-select {
+  width: 180px;
+}
+
+.rule-name {
+  overflow: hidden;
+  color: var(--ink-strong);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-code {
+  margin-top: 1px;
+  color: var(--ink-faint);
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.rule-source-name,
+.rule-owner {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-formula {
+  display: block;
+  overflow: hidden;
+  color: #33506f;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 4px 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--ink-faint);
+  background: #f7f9fd;
+  font-size: 11px;
+}
+
+.rule-fields-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 8px;
+}
+
+.rule-fields-hint {
+  color: var(--ink-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.rule-field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rule-field-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.4fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fbfcfe;
+}
+
+.rule-fields-empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .rule-source-select {
+    width: 100%;
+  }
+
+  .rule-field-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .rule-field-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

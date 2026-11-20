@@ -1,6 +1,6 @@
 # RinBI Frontend
 
-RinBI 数据问答助手的前端，基于 Vue 3 + Vite + Element Plus。用户登录后选择自己的数据源，用自然语言提问；页面通过 SSE 实时展示思考过程与答案，并在查询成功后渲染结果表格、SQL 和多个 ECharts 图表。历史会话保存在后端，可在侧栏恢复或删除。新用户可以提交注册申请，管理员在控制台审批账号，先统一配置数据源，再通过授权弹框勾选用户可访问的数据库。
+RinBI 数据问答助手的前端，基于 Vue 3 + Vite + Element Plus。用户登录后选择自己的数据源，用自然语言提问；页面通过 SSE 实时展示思考过程与答案，并在查询成功后渲染结果表格、SQL 和多个 ECharts 图表。历史会话保存在后端，可在侧栏恢复或删除；登录用户还可以按数据源维护统计规则，在提问时勾选需要遵循的业务口径。新用户可以提交注册申请，管理员在控制台审批账号，先统一配置数据源，再通过授权弹框勾选用户可访问的数据库。
 
 ## 技术栈
 
@@ -46,15 +46,18 @@ src/
 │  ├─ auth.js                 # 注册申请、登录、当前用户、退出
 │  ├─ admin.js                # 用户分页/审批、数据源分页增删改查、用户授权
 │  ├─ history.js              # 历史会话列表、详情、删除
+│  ├─ rules.js                # 统计规则分页/详情/候选项与增删改
 │  └─ agent.js                # 健康检查、数据源、SSE 聊天、清空会话
 ├─ components/
 │  ├─ LoginView.vue           # 登录 / 注册申请、表单校验与错误提示
-│  ├─ AdminPanel.vue          # 管理员用户分页、数据源分页与用户授权控制台
+│  ├─ AdminPanel.vue          # 管理员用户分页、审批与启停控制台
+│  ├─ DataSourcePanel.vue     # 管理员数据源分页、增删改查与用户授权控制台
+│  ├─ RulePanel.vue           # 统计规则列表、筛选、新增/编辑/删除与输入字段维护
 │  ├─ ChatMessage.vue         # 单条回答、Markdown、图表与表格编排
 │  ├─ ChartPanel.vue          # 多个 ChartSpec -> ECharts option
 │  ├─ ChartCanvas.vue         # ECharts 实例生命周期与自适应
 │  └─ QueryResultTable.vue    # 结果表格、分页与 SQL 追溯
-├─ styles/                    # 基础样式、聊天布局、登录/历史、管理员控制台、组件与响应式
+├─ styles/                    # 基础样式、聊天布局、登录/历史、管理员控制台、统计规则、组件与响应式
 └─ utils/
    ├─ session.js              # localStorage token、请求头、401 事件
    ├─ format.js               # 时间、耗时、状态格式化
@@ -74,16 +77,55 @@ src/
 
 > token 是不透明字符串，前端不解析其内容；服务端重启会导致 token 失效，此时下一次请求收到 `401` 并自动回到登录页。管理员禁用账号后，后端会立即吊销该用户 token，下一次请求同样回到登录页。
 
-### 管理员控制台
+### 管理员入口
 
-当 `GET /api/auth/me` 返回的 `user.role === "ADMIN"` 时，顶部显示「用户管理」入口；普通用户不会渲染该入口，但真正的权限校验仍在后端 `AdminService` 中完成。
+当 `GET /api/auth/me` 返回的 `user.role === "ADMIN"` 时，顶部显示「用户管理」和「数据源管理」两个独立入口；普通用户不会渲染这两个入口，但真正的权限校验仍在后端 `AdminService` 中完成。
+
+用户管理与数据源管理拆分为两个页面，顶部入口互斥切换，避免在同一控制台内混合操作。
 
 - **用户列表**：调用 `GET /api/admin/users?page=1&size=10`，后端按「待审批 → 正常 → 禁用」优先排序；支持按用户名/显示名称搜索、状态筛选和分页。
 - **审批/拒绝**：对待审批用户调用 `POST /api/admin/users/{id}/approve` 或 `/disable`；通过后用户即可登录，拒绝会将其置为禁用状态。已禁用用户可通过「启用账号」重新审批。
-- **数据源配置**：全局数据源通过 `GET /api/admin/datasources?page=1&size=10` 分页展示；新增/编辑走 `POST` / `PUT /api/admin/datasources`，删除走 `DELETE`。弹窗支持数据库 key、类型、JDBC URL、host/port/库名、账号密码、驱动、连接池、只读与启停等字段。
-- **用户授权**：点击数据源的「授权用户」打开勾选弹框，加载 `GET /api/admin/datasources/{id}/users`，保存时以 `PUT` 提交最终 `userIds`。普通用户只能看到并查询已授权的数据源。
+- **数据源配置**：在「数据源管理」页通过 `GET /api/admin/datasources?page=1&size=10` 分页展示；新增/编辑走 `POST` / `PUT /api/admin/datasources`，删除走 `DELETE`。弹窗支持数据库 key、类型、JDBC URL、host/port/库名、账号密码、驱动、连接池、只读与启停等字段。
+- **用户授权**：在「数据源管理」页点击数据源的「授权用户」打开勾选弹框，加载 `GET /api/admin/datasources/{id}/users`，保存时以 `PUT` 提交最终 `userIds`。普通用户只能看到并查询已授权的数据源。
 - **密码处理**：列表只显示 `passwordConfigured`，不返回密码；编辑时密码留空表示保留原密码，新密码由后端使用 AES-GCM 加密后落库。
 - **会话失效**：管理员禁用账号后，该用户已登录的页面会在下一次请求收到 `401` 并自动退出。
+
+### 统计规则
+
+顶部「统计规则」入口对所有已登录用户可见，规则管理页和对话页的规则选择都依赖当前用户已授权的数据源。规则按 `dataSourceKey` 隔离，规则代码全局唯一；所有有数据源权限的用户都可以查看并在提问时使用规则，但仅管理员可以新增、修改、删除，普通用户只能查看。
+
+#### 规则管理页
+
+- `RulePanel.vue` 挂载时并行加载 `GET /api/rules` 与 `GET /api/agent/databases`；列表支持按数据源、规则名称/代码关键字筛选和分页，展示规则名称、代码、版本、数据源、统计口径、维护人与更新时间。
+- 仅管理员显示「新增规则」，「新增规则」打开表单：数据源、规则代码、规则名称、规则说明、计算公式、业务规则、备注，以及最多 50 个输入字段（来源表、字段名、字段说明）。前端校验必填项与重复字段，长度限制和后端保持一致。普通用户的行操作只有「查看」，详情弹框为只读。
+- 保存调用 `POST /api/rules` 或 `PUT /api/rules/{id}`；成功后通知 `App.vue` 重新加载当前数据源的规则候选项。删除调用 `DELETE /api/rules/{id}` 并二次确认。
+- 后端返回的 `canEdit` 只用于按钮展示；即使普通用户手工构造请求，服务端仍会校验 `ADMIN` 角色并返回 `403`。`401` 交给全局登录态处理，其他错误在页面 `el-alert` 与消息提示中展示。
+
+#### 对话页规则选择
+
+- 只有「数据源」选择为具体库时，侧栏才渲染规则多选框；选择「自动选择（由模型判断）」时只显示提示，不加载也不发送规则，避免把 A 库口径套到模型最终选择的 B 库。
+- 切换数据源会调用 `GET /api/rules/options?dataSourceKey=...`，成功后默认全选；支持全选/清空、搜索和最多 50 条限制。请求使用序号丢弃过期响应，快速切换数据源时不会串台。
+- 提问时 `sendQuestion` 只在 `ruleIds` 非空时发送该字段。选择只影响当前数据源下的后续提问，不写入会话历史；切换数据源时会按新数据源重新加载并默认全选。
+- 加载失败显示内联错误与「重试」，该数据源没有规则时提供「去配置」（管理员）或「查看规则页」（普通用户）进入规则管理页。自动选择数据源的请求不携带 `ruleIds`；后端也会拒绝「未指定数据源但传规则」的请求。
+
+#### 接口与数据流
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant F as 前端
+    participant B as 后端
+    U->>F: 选择数据源
+    F->>B: GET /api/rules/options?dataSourceKey=xxx
+    B-->>F: [{ id, ruleCode, ruleName, ruleDescription }]
+    F->>F: 默认全选，用户可调整（≤ 50）
+    U->>F: 发送问题
+    F->>B: POST /api/agent/chat { question, database, ruleIds, conversationId? }
+    B->>B: 校验数据源权限，序列化规则注入规划提示词
+    B-->>F: SSE meta / reasoning / token / done
+```
+
+规则只影响查询规划，最终 SQL 仍经过后端的只读安全校验；具体字段约束和提示词注入规则见后端 README 的「统计规则（业务口径）」章节。前端的规则 API 统一封装在 `src/api/rules.js`。
 
 ### 历史会话
 
@@ -206,7 +248,7 @@ sequenceDiagram
     U->>F: 输入问题并发送
     F->>F: 立即插入用户消息，清空输入框
     F->>F: 显示 typing 指示与已耗时秒数
-    F->>B: POST /api/agent/chat {question, database?, conversationId?}
+    F->>B: POST /api/agent/chat {question, database?, ruleIds?, conversationId?}
     B-->>F: event: meta（会话、数据源、SQL、结构化结果）
     B-->>F: event: reasoning（思考过程分片，可连续多条）
     B-->>F: event: token（答案分片，可连续多条）
@@ -222,6 +264,7 @@ sequenceDiagram
 - 响应为 SSE：`meta` 先到，`reasoning` 与 `token` 都可连续多条，`done` 携带完整答案；答案以 token 分片增量下发，`done` 到达后以完整文本覆盖。
 - 同一时间只允许一个请求：`sending` 为真时输入框与发送按钮禁用。
 - 点击示例问题只填入输入框并聚焦，不自动发送，避免误触。
+- 选择具体数据源后，前端会加载并默认全选该数据源的统计规则；发送时以 `ruleIds` 附带，自动选择数据源时不发送该字段。
 
 ### 清空会话
 

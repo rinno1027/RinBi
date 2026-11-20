@@ -88,7 +88,17 @@ public class LlmService {
      * 生成查询计划。模型输出不是合法 JSON 时会自动要求其修复一次。
      */
     public QueryPlan plan(String question, String databaseKey, String schemaText, String historyText) {
-        String userPrompt = buildPlanUserPrompt(question, databaseKey, schemaText, historyText);
+        return plan(question, databaseKey, schemaText, historyText, null);
+    }
+
+    /**
+     * 生成查询计划，并把用户勾选的统计规则 JSON 一并注入提示词。
+     * 规则只影响规划阶段（生成 SQL 的口径），不会传给结果整理阶段。
+     */
+    public QueryPlan plan(String question, String databaseKey, String schemaText,
+                          String historyText, String rulePromptJson) {
+        String userPrompt = buildPlanUserPrompt(question, databaseKey, schemaText,
+                historyText, rulePromptJson);
         String raw = call(planSystemPrompt, userPrompt);
         try {
             return parsePlan(raw);
@@ -275,7 +285,8 @@ public class LlmService {
     }
 
     private String buildPlanUserPrompt(String question, String databaseKey,
-                                       String schemaText, String historyText) {
+                                       String schemaText, String historyText,
+                                       String rulePromptJson) {
         StringBuilder prompt = new StringBuilder();
         if (historyText != null && !historyText.trim().isEmpty()) {
             prompt.append("最近会话历史：\n").append(historyText).append("\n\n");
@@ -286,6 +297,11 @@ public class LlmService {
                     .append("（database 字段必须返回该 key）\n");
         } else {
             prompt.append("用户未指定数据库，请根据问题选择最合适的一个。\n");
+        }
+        if (rulePromptJson != null && !rulePromptJson.isBlank()) {
+            prompt.append("\n用户勾选的统计规则（JSON 数组，必须严格遵守）：\n")
+                    .append(rulePromptJson)
+                    .append("\n");
         }
         prompt.append("\n用户问题：\n").append(question);
         return prompt.toString();

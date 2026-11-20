@@ -1,5 +1,6 @@
 package org.rin;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -7,22 +8,32 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.rin.agent.AgentStatus;
 import org.rin.auth.AuthService;
+import org.rin.auth.AuthUser;
 import org.rin.agent.ReasoningStreamClient;
 import org.rin.agent.dto.ChatResponse;
 import org.rin.agent.dto.ReasoningStreamResult;
+import org.rin.rule.StatRuleService;
+import org.rin.rule.dto.StatRuleInputFieldRequest;
+import org.rin.rule.dto.StatRuleRequest;
+import org.rin.rule.dto.StatRuleView;
+import org.rin.rule.entity.StatRule;
+import org.rin.rule.mapper.StatRuleMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -45,6 +56,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest(classes = AppStart.class)
 @AutoConfigureMockMvc
+// dev 配置为了调试开启了 SQL 回显，这里覆盖为默认值以验证“默认不泄漏 SQL”。
+@TestPropertySource(properties = "agent.sql.expose-sql=false")
 class AgentChatFlowTest {
 
     @Autowired
@@ -56,6 +69,12 @@ class AgentChatFlowTest {
     @Autowired
     private AuthService authService;
 
+    @Autowired
+    private StatRuleService statRuleService;
+
+    @Autowired
+    private StatRuleMapper statRuleMapper;
+
     @MockitoBean
     private StreamingChatModel chatModel;
 
@@ -63,11 +82,27 @@ class AgentChatFlowTest {
     private ReasoningStreamClient reasoningStreamClient;
 
     private String token;
+    private Long adminId;
+    private AuthUser adminUser;
+    private final List<String> ruleCodes = new ArrayList<>();
+    private String lastPlanPrompt;
 
     @BeforeEach
     void login() {
         // bootstrap 会创建默认管理员 admin/admin123，并挂载 H2 演示数据源 demo。
-        token = authService.login("admin", "admin123").token();
+        AuthService.LoginResult result = authService.login("admin", "admin123");
+        token = result.token();
+        adminId = result.user().id();
+        adminUser = result.user();
+    }
+
+    @AfterEach
+    void cleanUpRules() {
+        for (String ruleCode : ruleCodes) {
+            statRuleMapper.delete(new LambdaQueryWrapper<StatRule>()
+                    .eq(StatRule::getRuleCode, ruleCode));
+        }
+        ruleCodes.clear();
     }
 
     private String authHeader() {
@@ -81,6 +116,9 @@ class AgentChatFlowTest {
             List<ChatMessage> messages = request.messages();
             ChatMessage last = messages.get(messages.size() - 1);
             String prompt = last instanceof UserMessage ? ((UserMessage) last).singleText() : "";
+            if (!prompt.contains("查询结果总行数")) {
+                lastPlanPrompt = prompt;
+            }
             String answer = prompt.contains("查询结果总行数") ? formattedAnswer : planJson;
             handler.onPartialResponse(answer);
             handler.onCompleteResponse(dev.langchain4j.model.chat.response.ChatResponse.builder()
@@ -203,6 +241,50 @@ class AgentChatFlowTest {
         assertEquals(AgentStatus.NOT_FEASIBLE, done.getStatus());
         assertEquals("当前数据没有 客户编号 对应的员工信息", done.getReason());
         assertEquals("当前数据没有 客户编号 对应的员工信息", done.getAnswer());
+    }
+
+    @Test
+    void injectsSelectedRulesIntoPlanningPrompt() throws Exception {
+        String ruleCode = "IT_PROMPT_" + System.nanoTime();
+        StatRuleRequest rule = new StatRuleRequest();
+        rule.setDataSourceKey("demo");
+        rule.setRuleCode(ruleCode);
+        rule.setRuleName("客户数量统计口径");
+        rule.setRuleDescription("按所属地区统计客户数量");
+        rule.setFormula("COUNT(customer.id)");
+        rule.setBusinessRule("排除已删除客户");
+        StatRuleInputFieldRequest field = new StatRuleInputFieldRequest();
+        field.setSourceTable("customer");
+        field.setFieldName("region");
+        field.setFieldDescription("所属地区");
+        rule.setInputFields(List.of(field));
+        StatRuleView created = statRuleService.createRule(adminUser, rule);
+        ruleCodes.add(ruleCode);
+
+        stubModel("{\"feasible\":true,\"database\":\"demo\","
+                        + "\"sql\":\"SELECT region, COUNT(*) AS 客户数量 FROM customer \""
+                        + "GROUP BY region ORDER BY 客户数量 DESC\","
+                        + "\"explanation\":\"按地区统计客户数\"}",
+                "华东地区客户数量最多。");
+
+        performChat("{\"question\":\"每个地区有多少客户？\",\"database\":\"demo\","
+                + "\"conversationId\":\"flow-rule\",\"ruleIds\":[" + created.getId() + "]}");
+
+        assertTrue(lastPlanPrompt.contains("用户勾选的统计规则"),
+                "规划提示词应包含规则区块：" + lastPlanPrompt);
+        assertTrue(lastPlanPrompt.contains(ruleCode), "规划提示词应包含规则代码");
+        assertTrue(lastPlanPrompt.contains("COUNT(customer.id)"), "规划提示词应包含计算公式");
+        assertTrue(lastPlanPrompt.contains("\"fieldName\":\"region\""),
+                "规划提示词应包含规则输入字段");
+
+        // 未指定数据源时不允许使用规则，避免把规则套到模型自动选择的另一个库上。
+        mockMvc.perform(post("/api/agent/chat")
+                        .header("Authorization", authHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"每个地区有多少客户？\",\"ruleIds\":["
+                                + created.getId() + "]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsString("未指定数据源")));
     }
 
     @Test

@@ -17,8 +17,9 @@
 - **结构化结果**：响应同时包含 `answer`（Markdown）与 `table`（列/行），前端可渲染表格、分页、SQL 追溯。
 - **业务化输出**：查询结果的列名优先使用数据库表/字段注释；模型答案、思考过程、图表标题中的真实表名/字段名会被替换为业务名称，SSE 分片同样在服务端完成替换。
 - **多图表可视化**：模型可在答案末尾给出多个受约束的 `chart` 代码块，后端逐个校验列名与数值类型后转换为 `charts`（最多 4 个）；前端用 ECharts 按 `table` 数据渲染柱状图、折线图、饼图或散点图，并以响应式网格并排展示，不执行模型输出的 HTML/JS。
+- **统计规则（业务口径）**：按数据源维护可复用的计算公式与业务约束，拥有该数据源权限的登录用户都能查看，并在提问时勾选需要遵循的规则；规则会以 JSON 注入查询规划提示词，约束过滤、连接、时间窗口、去重与聚合口径。规则代码全局唯一，仅管理员可新增、修改、删除，单次最多注入 50 条。
 - **演示数据**：首次启动为默认管理员自动创建 H2 内存演示库（客户、商品、订单），开箱即可体验。
-- **前端**：Vue 3 + Vite + Element Plus + ECharts，支持登录/注册、历史会话恢复/删除、数据源选择、Markdown、结果表格、图表、警告与错误展示、响应式布局；管理员控制台提供用户分页、数据源分页与用户授权勾选。
+- **前端**：Vue 3 + Vite + Element Plus + ECharts，支持登录/注册、历史会话恢复/删除、数据源选择、统计规则管理与对话规则选择、Markdown、结果表格、图表、警告与错误展示、响应式布局；管理员入口分为「用户管理」和「数据源管理」两个独立页面，分别提供用户分页审批、数据源分页维护与用户授权勾选。
 
 ## 技术栈
 
@@ -45,6 +46,7 @@ RinBIBackend/
 │  ├─ config/                # AgentProperties、LLM、拦截器、启动初始化
 │  ├─ db/                    # 全局数据源注册、用户授权、Schema、SQL 校验、查询执行
 │  ├─ history/               # 历史会话与消息持久化
+│  ├─ rule/                  # 统计规则 CRUD、数据源权限校验、对话规则提示词注入
 │  ├─ security/              # 数据源密码 AES-GCM 加解密
 │  ├─ exception/             # 业务异常
 │  └─ web/                   # 统一异常响应
@@ -76,6 +78,7 @@ AgentController（userId 来自登录态）
    ▼
 AgentService
    ├─ SchemaService ──► DatabaseRegistry ──► 用户只读 HikariDataSource / JdbcTemplate
+   ├─ StatRuleService ► 规则权限校验 + 规则 JSON 注入规划提示词
    ├─ LlmService ─────► LLM（规划 JSON → SQL）
    ├─ SqlGuard ───────► JSqlParser 只读校验
    ├─ QueryExecutor ──► 二次校验 + maxRows / timeout / 字符上限
@@ -85,7 +88,7 @@ AgentService
    └─ HistoryService ─► rinbidb.chat_conversation / chat_message
 ```
 
-元数据（用户、数据源、授权关系、历史）统一保存在本地 MySQL 8.0 的 `rinbidb` 库，由 MyBatis-Plus 访问；被查询的业务库则按全局数据源配置动态创建只读连接池。
+元数据（用户、数据源、授权关系、统计规则、历史）统一保存在本地 MySQL 8.0 的 `rinbidb` 库，由 MyBatis-Plus 访问；被查询的业务库则按全局数据源配置动态创建只读连接池。
 
 ## 快速开始
 
@@ -326,6 +329,8 @@ agent:
 | `user_data_source` | 用户与数据源的授权关系（`user_id` + `data_source_id`） |
 | `chat_conversation` | 历史会话（标题、最近数据源、更新时间） |
 | `chat_message` | 用户问题与助手响应 JSON |
+| `stat_rule` | 按数据源维护的统计规则（公式、业务规则、版本与创建人） |
+| `stat_rule_input_field` | 规则依赖的表/字段及说明，随规则级联删除 |
 
 `data_source` 关键字段：
 
@@ -345,9 +350,41 @@ agent:
 - 管理员先通过 `/api/admin/datasources` 创建连接配置，再通过 `/api/admin/datasources/{id}/users` 勾选授权用户；密码字段只写不读，查询接口只返回 `passwordConfigured` 标记。
 - 旧版 `user_data_source` 表若包含 `db_key` 连接字段，启动脚本会自动迁移为 `data_source` + 授权中间表，并按 `db_key` 复用重复配置。
 
+## 统计规则（业务口径）
+
+统计规则把某个数据源上的业务指标口径固化下来，供拥有该数据源权限的用户在提问时复用。规则主表为 `stat_rule`，规则依赖的表/字段保存在 `stat_rule_input_field`（随规则级联删除）；删除 `data_source` 时，其下规则也会由外键级联清理。
+
+`stat_rule` 关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `data_source_key` | 规则所属数据源 key；规则只能用于该数据源 |
+| `rule_code` | 规则代码，**全局唯一**，不区分数据源 |
+| `rule_name` / `rule_description` | 规则名称与适用场景说明 |
+| `formula` / `business_rule` | 计算公式，以及过滤、时间窗口、去重、分组等口径约束 |
+| `remark` | 补充备注 |
+| `version_no` | 后端维护的版本号，每次保存更新 |
+| `created_by` / `updated_by` | 创建人与最后修改人，保留审计信息；新增、修改、删除仅限管理员 |
+
+- 拥有数据源访问权限的登录用户都可以通过 `/api/rules` 查看规则，并在对话中勾选使用；仅 `ADMIN` 可以新增、修改、删除规则，普通用户只读，`canEdit` 仅在当前用户为管理员时为 `true`。管理员只能维护自己可访问数据源下的规则，写操作同样要求对目标数据源有访问权限；管理员可维护该范围内的任意规则，不再要求是创建人。
+- `rule_code` 必填且最长 50 字符，`rule_name` 最长 128，`rule_description` / `remark` 最长 512，`formula` 最长 1024，`business_rule` 最长 4000；每条规则最多维护 50 个输入字段，字段按 `source_table + field_name` 去重（忽略大小写），单条字段说明最长 512 字符。
+- 对话请求可携带 `ruleIds`，服务端去重后单次最多 50 条。只有显式指定 `database` 时才允许使用规则；未指定数据源却传了 `ruleIds`、规则不属于该数据源、规则不存在或用户无权访问时，分别返回 `400` / `403`。
+- 后端在 `AgentService#prepare` 中校验并序列化规则，作为 JSON 注入查询规划提示词；`rulePromptJson` 字段被 `@JsonIgnore`，客户端不能伪造。规则只约束 SQL 规划（过滤、连接、时间窗口、去重与聚合口径），生成的 SQL 仍会经过 `SqlGuard`，规则也不参与结果后处理和图表生成。
+- 请求示例：
+
+```json
+{
+  "question": "统计本月的有效成交额",
+  "database": "demo",
+  "ruleIds": [12, 18]
+}
+```
+
+规划提示词中的规则对象字段为 `ruleCode`、`ruleName`、`ruleDescription`、`formula`、`businessRule`、`remark`、`versionNo` 与 `inputFields`（`sourceTable` / `fieldName` / `fieldDescription`）。未选择规则时不会拼接该段提示词，行为与未引入规则前一致。
+
 ## HTTP API
 
-除注册、登录与健康检查外，所有接口都需要 `Authorization: Bearer <token>`；未登录返回 `401`，访问他人资源或非管理员访问 `/api/admin/**` 返回 `403`。
+除注册、登录与健康检查外，所有接口都需要 `Authorization: Bearer <token>`；未登录返回 `401`，访问他人资源、非管理员访问 `/api/admin/**` 或执行规则写操作返回 `403`。
 
 **认证**（`/api/auth`）
 
@@ -364,7 +401,7 @@ agent:
 | --- | --- | --- |
 | `GET` | `/health` | 健康状态；登录后附带当前用户数据源 key 与会话数量 |
 | `GET` | `/databases` | 当前用户的数据源列表（不含连接凭据） |
-| `POST` | `/chat` | 提交问题（SSE 流式响应） |
+| `POST` | `/chat` | 提交问题（SSE 流式响应；可选 `ruleIds` 注入统计规则） |
 | `DELETE` | `/conversations/{conversationId}` | 清空服务端会话记忆，返回 `204` |
 
 **历史**（`/api/history`）
@@ -390,6 +427,19 @@ agent:
 | `PUT` | `/datasources/{dataSourceId}/users` | 以 `{"userIds":[...]}` 覆盖该数据源的用户授权 |
 
 管理员接口会在 `AdminService` 中再次校验 `ADMIN` 角色，不能仅靠隐藏前端入口绕过。禁用账号会调用 `AuthService.revokeUserSessions` 立即吊销该用户全部在线 token。用户与数据源列表统一返回 `{ items, total, page, size }` 分页结构，`size` 最大为 100。
+
+**统计规则**（`/api/rules`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/?page=1&size=10&dataSourceKey=&keyword=` | 当前用户可访问的规则分页；`size` 最大 100，列表不返回输入字段明细 |
+| `GET` | `/options?dataSourceKey=demo` | 对话页候选项，仅返回 `id`、`ruleCode`、`ruleName`、`ruleDescription` |
+| `GET` | `/{ruleId}` | 规则详情，含 `inputFields`、`canEdit` 与审计信息 |
+| `POST` | `/` | 新增规则（仅管理员）；请求体见 `StatRuleRequest`，创建人由登录态写入 |
+| `PUT` | `/{ruleId}` | 覆盖修改规则及输入字段（仅管理员） |
+| `DELETE` | `/{ruleId}` | 删除规则及输入字段（仅管理员），返回 `204` |
+
+统计规则接口同样需要 Bearer token，读取按数据源授权过滤。新增、修改、删除在 `StatRuleService` 中强制校验 `ADMIN` 角色，普通用户只能查看和使用规则；`canEdit` 只用于前端按钮展示，不能替代服务端鉴权。
 
 ## 应用截图
 <img width="1894" height="876" alt="ScreenShot_2026-10-22_150247_052" src="https://github.com/user-attachments/assets/283b792a-65dc-4877-830a-b49aadfefd0a" />

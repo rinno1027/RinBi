@@ -30,12 +30,29 @@
           type="button"
           class="admin-toggle-button"
           :class="{ active: adminMode }"
-          @click="adminMode = !adminMode"
+          @click="toggleAdminMode"
         >
           {{ adminMode ? '返回问答' : '用户管理' }}
         </button>
         <button
-          v-if="!adminMode"
+          v-if="isAdmin"
+          type="button"
+          class="admin-toggle-button"
+          :class="{ active: dataSourceMode }"
+          @click="toggleDataSourceMode"
+        >
+          {{ dataSourceMode ? '返回问答' : '数据源管理' }}
+        </button>
+        <button
+          type="button"
+          class="admin-toggle-button"
+          :class="{ active: ruleMode }"
+          @click="toggleRuleMode"
+        >
+          {{ ruleMode ? '返回问答' : '统计规则' }}
+        </button>
+        <button
+          v-if="!adminMode && !dataSourceMode && !ruleMode"
           type="button"
           class="clear-button"
           :disabled="sending || clearing || (!messages.length && !conversationId)"
@@ -53,6 +70,18 @@
       v-if="adminMode && isAdmin"
       :current-user="currentUser"
       @close="adminMode = false"
+    />
+
+    <DataSourcePanel
+      v-else-if="dataSourceMode && isAdmin"
+      @close="dataSourceMode = false"
+    />
+
+    <RulePanel
+      v-else-if="ruleMode"
+      :current-user="currentUser"
+      @close="handleRulePanelClose"
+      @changed="handleRulesChanged"
     />
 
     <div v-else class="app-body">
@@ -92,6 +121,73 @@
           <div v-else class="db-detail">
             <p>不指定数据源时，模型会根据问题从已配置的数据源中自动选择。</p>
           </div>
+
+          <div class="rule-picker">
+            <div class="rule-picker-head">
+              <span class="rule-picker-label">统计规则</span>
+              <template v-if="currentDatabase">
+                <span class="rule-picker-meta">
+                  已选 {{ selectedRuleIds.length }} / {{ ruleOptions.length }}
+                </span>
+                <button
+                  v-if="ruleOptions.length"
+                  type="button"
+                  class="rule-picker-link"
+                  :disabled="sending"
+                  @click="toggleAllRules"
+                >
+                  {{ allRulesSelected ? '清空' : '全选' }}
+                </button>
+              </template>
+              <span v-else class="rule-picker-meta">需指定数据源</span>
+            </div>
+
+            <el-select
+              v-if="currentDatabase"
+              v-model="selectedRuleIds"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              size="small"
+              class="rule-select"
+              :multiple-limit="50"
+              :loading="loadingRules"
+              :disabled="loadingRules || !ruleOptions.length || sending"
+              :placeholder="ruleOptions.length ? '默认选择全部规则' : '该数据源暂无规则'"
+            >
+              <el-option
+                v-for="rule in ruleOptions"
+                :key="rule.id"
+                :label="rule.ruleName"
+                :value="rule.id"
+              >
+                <span class="rule-option-name">{{ rule.ruleName }}</span>
+                <span class="rule-option-code">{{ rule.ruleCode }}</span>
+              </el-option>
+            </el-select>
+
+            <p v-if="!currentDatabase" class="rule-picker-hint">
+              自动选择数据源时不注入统计规则。
+            </p>
+            <p v-else-if="ruleError" class="rule-picker-hint is-error">
+              {{ ruleError }}
+              <button type="button" class="rule-picker-link" @click="loadRuleOptions">
+                重试
+              </button>
+            </p>
+            <p v-else-if="!loadingRules && !ruleOptions.length" class="rule-picker-hint">
+              该数据源暂无统计规则，
+              <button type="button" class="rule-picker-link" @click="openRuleManager">
+                {{ isAdmin ? '去配置' : '查看规则页' }}
+              </button>
+            </p>
+            <p v-else class="rule-picker-hint">
+              仅对本次提问生效，选中规则会以 JSON 注入规划提示词。
+            </p>
+          </div>
+
           <p v-if="!loadingMeta && !databases.length" class="panel-hint">
             暂无可用数据源，请检查后端配置。
           </p>
@@ -258,11 +354,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AdminPanel from './components/AdminPanel.vue'
 import ChatMessage from './components/ChatMessage.vue'
+import DataSourcePanel from './components/DataSourcePanel.vue'
 import LoginView from './components/LoginView.vue'
+import RulePanel from './components/RulePanel.vue'
 import { deleteConversation, fetchDatabases, fetchHealth, sendQuestion } from './api/agent'
 import { fetchCurrentUser, logout } from './api/auth'
 import {
@@ -270,6 +368,7 @@ import {
   fetchConversationDetail,
   fetchConversations
 } from './api/history'
+import { fetchRuleOptions } from './api/rules'
 import { createConversationId, formatDateTime, STORAGE_KEYS } from './utils/format'
 import { clearToken, getToken, UNAUTHORIZED_EVENT } from './utils/session'
 
@@ -284,6 +383,8 @@ const currentUser = ref(null)
 const authChecking = ref(true)
 const loggingOut = ref(false)
 const adminMode = ref(false)
+const dataSourceMode = ref(false)
+const ruleMode = ref(false)
 const historyList = ref([])
 const loadingHistory = ref(false)
 const restoringId = ref('')
@@ -292,6 +393,10 @@ const messages = ref([])
 const question = ref('')
 const databases = ref([])
 const selectedDatabase = ref(readStorage(STORAGE_KEYS.database))
+const ruleOptions = ref([])
+const selectedRuleIds = ref([])
+const loadingRules = ref(false)
+const ruleError = ref('')
 const conversationId = ref(readStorage(STORAGE_KEYS.conversationId))
 const serviceOnline = ref(null)
 const pageError = ref('')
@@ -303,6 +408,7 @@ const composerRef = ref(null)
 
 let messageSequence = 0
 let scrollFrame = null
+let ruleRequestSequence = 0
 
 const userInitial = computed(() => {
   const name = currentUser.value?.displayName || currentUser.value?.username || '?'
@@ -311,6 +417,11 @@ const userInitial = computed(() => {
 const isAdmin = computed(() => currentUser.value?.role === 'ADMIN')
 const currentDatabase = computed(() =>
   databases.value.find((database) => database.key === selectedDatabase.value)
+)
+const allRulesSelected = computed(
+  () =>
+    ruleOptions.value.length > 0 &&
+    selectedRuleIds.value.length === ruleOptions.value.length
 )
 const canSend = computed(() => question.value.trim().length > 0 && !sending.value)
 const serviceText = computed(() => {
@@ -347,6 +458,109 @@ function writeStorage(key, value) {
     // 隐私模式下 localStorage 可能不可用，忽略即可。
   }
 }
+
+/**
+ * 按当前数据源拉取对话页可选规则；默认全选。
+ * 用请求序号丢弃过期响应，避免快速切换数据源时选项串台。
+ */
+async function loadRuleOptions() {
+  const key = selectedDatabase.value
+  const sequence = ++ruleRequestSequence
+
+  if (!key || !currentUser.value) {
+    ruleOptions.value = []
+    selectedRuleIds.value = []
+    ruleError.value = ''
+    loadingRules.value = false
+    return
+  }
+
+  loadingRules.value = true
+  ruleError.value = ''
+  try {
+    const data = await fetchRuleOptions(key)
+    if (sequence !== ruleRequestSequence || key !== selectedDatabase.value) {
+      return
+    }
+    ruleOptions.value = Array.isArray(data) ? data.filter((rule) => rule && rule.id != null) : []
+    selectedRuleIds.value = ruleOptions.value.map((rule) => rule.id)
+  } catch (error) {
+    if (sequence !== ruleRequestSequence) {
+      return
+    }
+    ruleOptions.value = []
+    selectedRuleIds.value = []
+    if (error.status !== 401) {
+      ruleError.value = `统计规则加载失败：${error.message}`
+    }
+  } finally {
+    if (sequence === ruleRequestSequence) {
+      loadingRules.value = false
+    }
+  }
+}
+
+function toggleAllRules() {
+  selectedRuleIds.value = allRulesSelected.value
+    ? []
+    : ruleOptions.value.map((rule) => rule.id)
+}
+
+function toggleRuleMode() {
+  ruleMode.value = !ruleMode.value
+  if (ruleMode.value) {
+    adminMode.value = false
+    dataSourceMode.value = false
+  } else {
+    loadRuleOptions()
+  }
+}
+
+function toggleAdminMode() {
+  adminMode.value = !adminMode.value
+  if (adminMode.value) {
+    dataSourceMode.value = false
+    ruleMode.value = false
+  }
+}
+
+function toggleDataSourceMode() {
+  dataSourceMode.value = !dataSourceMode.value
+  if (dataSourceMode.value) {
+    adminMode.value = false
+    ruleMode.value = false
+  }
+}
+
+function openRuleManager() {
+  adminMode.value = false
+  dataSourceMode.value = false
+  ruleMode.value = true
+}
+
+function handleRulePanelClose() {
+  ruleMode.value = false
+  loadRuleOptions()
+}
+
+function handleRulesChanged() {
+  if (selectedDatabase.value) {
+    loadRuleOptions()
+  }
+}
+
+function resetRuleSelection() {
+  ruleRequestSequence += 1
+  ruleOptions.value = []
+  selectedRuleIds.value = []
+  ruleError.value = ''
+  loadingRules.value = false
+}
+
+watch(selectedDatabase, (value) => {
+  writeStorage(STORAGE_KEYS.database, value)
+  loadRuleOptions()
+})
 
 function nextMessageId() {
   messageSequence += 1
@@ -427,6 +641,9 @@ async function loadBootstrap() {
 
   pageError.value = problems.join(' ')
   loadingMeta.value = false
+  if (currentUser.value) {
+    loadRuleOptions()
+  }
 }
 
 function resetConversationState() {
@@ -605,6 +822,9 @@ async function loadWorkspace() {
 async function handleAuthenticated(user) {
   authChecking.value = false
   adminMode.value = false
+  dataSourceMode.value = false
+  ruleMode.value = false
+  resetRuleSelection()
   if (user) {
     currentUser.value = user
   } else {
@@ -632,6 +852,9 @@ async function handleLogout() {
     clearToken()
     currentUser.value = null
     adminMode.value = false
+    dataSourceMode.value = false
+    ruleMode.value = false
+    resetRuleSelection()
     resetConversationState()
     historyList.value = []
     databases.value = []
@@ -651,6 +874,9 @@ function handleUnauthorized() {
   authChecking.value = false
   loggingOut.value = false
   adminMode.value = false
+  dataSourceMode.value = false
+  ruleMode.value = false
+  resetRuleSelection()
   resetConversationState()
   historyList.value = []
   databases.value = []
@@ -737,6 +963,7 @@ async function handleSend() {
     const response = await sendQuestion({
       question: text,
       database: selectedDatabase.value,
+      ruleIds: selectedDatabase.value ? [...selectedRuleIds.value] : [],
       conversationId: activeConversationId,
       onMeta: (meta) => {
         const message = messages.value[assistantIndex]

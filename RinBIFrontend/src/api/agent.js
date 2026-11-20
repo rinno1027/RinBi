@@ -58,6 +58,7 @@ function parseEventPayload(data) {
  * @param {object} options
  * @param {string} options.question 用户问题
  * @param {string} [options.database] 指定数据源
+ * @param {Array<number>} [options.ruleIds] 本次提问注入的统计规则 id
  * @param {string} [options.conversationId] 会话 id
  * @param {(meta: object) => void} [options.onMeta] 收到 meta 时回调
  * @param {(chunk: string) => void} [options.onReasoning] 收到思考分片时回调
@@ -67,6 +68,7 @@ function parseEventPayload(data) {
 export async function sendQuestion({
   question,
   database,
+  ruleIds,
   conversationId,
   onMeta,
   onReasoning,
@@ -75,6 +77,9 @@ export async function sendQuestion({
   const payload = { question }
   if (database) {
     payload.database = database
+  }
+  if (Array.isArray(ruleIds) && ruleIds.length) {
+    payload.ruleIds = ruleIds
   }
   if (conversationId) {
     payload.conversationId = conversationId

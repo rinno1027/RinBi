@@ -10,6 +10,7 @@ import org.rin.db.*;
 import org.rin.exception.BadRequestException;
 import org.rin.history.HistoryService;
 import org.rin.history.HistoryService.HistoryExchange;
+import org.rin.rule.StatRuleService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -64,6 +66,9 @@ public class AgentService {
     @Autowired
     private HistoryService historyService;
 
+    @Autowired
+    private StatRuleService statRuleService;
+
     public ChatResponse chat(Long userId, ChatRequest request) {
         return chat(userId, request, null);
     }
@@ -104,10 +109,21 @@ public class AgentService {
             throw new BadRequestException("conversationId 只能包含字母、数字、下划线和短横线，长度 1-64");
         }
 
+        // 规则只对用户显式选择的数据源生效；自动选择数据源时忽略/拒绝规则，
+        // 避免把某个库的业务口径错误套到模型最终选中的另一个库上。
+        List<Long> ruleIds = normalizeRuleIds(request.getRuleIds());
+        if (requestedDatabase == null && !ruleIds.isEmpty()) {
+            throw new BadRequestException("未指定数据源时不能使用统计规则");
+        }
+        String rulePromptJson = statRuleService.buildPromptJson(
+                userId, requestedDatabase, ruleIds);
+
         ChatRequest prepared = new ChatRequest();
         prepared.setQuestion(question);
         prepared.setDatabase(requestedDatabase);
         prepared.setConversationId(conversationId);
+        prepared.setRuleIds(ruleIds);
+        prepared.setRulePromptJson(rulePromptJson);
         return prepared;
     }
 
@@ -120,7 +136,7 @@ public class AgentService {
         ChatResponse response;
         try {
             response = doChat(userId, prepared.getQuestion(), prepared.getDatabase(),
-                    conversationId, start, listener);
+                    conversationId, start, listener, prepared.getRulePromptJson());
         } catch (BadRequestException e) {
             throw e;
         } catch (UnsafeSqlException e) {
@@ -145,7 +161,7 @@ public class AgentService {
 
     private ChatResponse doChat(Long userId, String question, String requestedDatabase,
                                 String conversationId, long start,
-                                ChatStreamListener listener) {
+                                ChatStreamListener listener, String rulePromptJson) {
         String schemaText = requestedDatabase == null
                 ? schemaService.getAllSchemas(userId)
                 : schemaService.getSchema(userId, requestedDatabase);
@@ -153,7 +169,8 @@ public class AgentService {
         String historyText = conversationMemory.getHistoryText(
                 ConversationMemory.memoryKey(userId, conversationId));
 
-        QueryPlan plan = llmService.plan(question, requestedDatabase, schemaText, historyText);
+        QueryPlan plan = llmService.plan(question, requestedDatabase, schemaText,
+                historyText, rulePromptJson);
         if (!plan.isFeasiblePlan()) {
             String reason = StringUtils.hasText(plan.getReason())
                     ? plan.getReason().trim() : "当前数据无法支持该问题";
@@ -527,6 +544,24 @@ public class AgentService {
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private List<Long> normalizeRuleIds(List<Long> ruleIds) {
+        if (ruleIds == null || ruleIds.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<Long> unique = new LinkedHashSet<>();
+        for (Long ruleId : ruleIds) {
+            if (ruleId == null || ruleId <= 0) {
+                throw new BadRequestException("统计规则 ID 不合法");
+            }
+            unique.add(ruleId);
+        }
+        if (unique.size() > StatRuleService.MAX_RULES_PER_CHAT) {
+            throw new BadRequestException("单次对话最多选择 "
+                    + StatRuleService.MAX_RULES_PER_CHAT + " 条统计规则");
+        }
+        return List.copyOf(unique);
     }
 
     private String safeMessage(Throwable throwable) {

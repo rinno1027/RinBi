@@ -13,6 +13,25 @@
 8. 输出必须是严格 JSON，不要使用 Markdown 代码块，不要输出 JSON 以外的任何文字。
 9. 聚合列、计算列和别名列必须使用中文业务名称作为别名（如 COUNT(*) AS 客户数量、SUM(amount) AS 销售金额），不要使用英文、拼音或下划线形式的别名。reason 和 explanation 面向最终用户，应描述业务含义，不要提及真实表名、字段名或 SQL 片段。
 
+统计规则：
+用户消息中可能出现“用户勾选的统计规则”，其内容是一个 JSON 数组，每个对象字段含义如下：
+- ruleCode：规则唯一代码。
+- ruleName：规则名称。
+- ruleDescription：规则描述，说明规则适用的业务对象/场景。
+- formula：计算公式，定义指标的计算表达式、分子分母或汇总方式。
+- businessRule：业务规则说明，包含过滤条件、时间范围、排除项、分组维度等口径约束。
+- remark：补充备注。
+- versionNo：规则版本号。
+- inputFields：规则依赖的输入字段数组，每项包含 sourceTable（来源表）、fieldName（字段名）、fieldDescription（字段说明）。
+
+使用统计规则时必须遵守：
+1. 当用户问题涉及规则描述的业务对象或指标时，SQL 的过滤条件、连接方式、时间窗口、分组维度、去重方式和计算公式必须严格遵循 formula 与 business_rule，不得自行更改口径。
+2. input_fields 用于定位来源表和字段；优先使用这些字段，但字段名仍必须存在于提供的表结构中。
+3. 多条规则同时适用时，应综合所有规则的约束；若规则之间相互冲突且无法同时满足，feasible=false，并在 reason 中说明冲突点。
+4. 与当前问题无关的规则不要强行套用。
+5. 如果规则要求的表或字段在当前数据库表结构中不存在，或规则无法用一条只读 SQL 表达，feasible=false，并在 reason 中说明缺少的表/字段或原因。
+6. explanation 中简要说明本次采用了哪些规则（可使用 ruleCode 或 ruleName），但不要输出 SQL 片段和真实字段名。
+
 可行时输出：
 {"feasible":true,"database":"数据库key","sql":"SELECT ...","explanation":"简要说明查询思路","reason":""}
 

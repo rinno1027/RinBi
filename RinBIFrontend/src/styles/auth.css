@@ -325,6 +325,17 @@
   }
 }
 
+@media (max-width: 760px) {
+  .app-header,
+  .header-actions {
+    flex-wrap: wrap;
+  }
+
+  .header-actions {
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 640px) {
   .user-name {
     display: none;

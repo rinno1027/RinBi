@@ -115,6 +115,57 @@ PREPARE legacy_stmt FROM @drop_legacy_sql;
 EXECUTE legacy_stmt;
 DEALLOCATE PREPARE legacy_stmt;
 
+-- ============================================================
+-- 统计规则：用户为某个数据源维护的业务统计口径。
+-- 规则本身可被拥有该数据源权限的用户共享使用，但新增、修改、删除仅限管理员。
+-- 规则选择结果仅注入查询规划提示词，不参与结果后处理。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stat_rule (
+    id               BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+    data_source_key  VARCHAR(64)   NOT NULL COMMENT '所属数据源 key',
+    version_no       VARCHAR(32)   NOT NULL COMMENT '版本号（每次保存更新）',
+    rule_code        VARCHAR(50)   NOT NULL COMMENT '规则代码，全局唯一',
+    rule_name        VARCHAR(128)  NOT NULL COMMENT '规则名称',
+    rule_description VARCHAR(512)           DEFAULT NULL COMMENT '规则描述',
+    formula          VARCHAR(1024)          DEFAULT NULL COMMENT '计算公式',
+    business_rule    TEXT                   DEFAULT NULL COMMENT '业务规则说明',
+    remark           VARCHAR(512)           DEFAULT NULL COMMENT '备注',
+    created_by       BIGINT        NOT NULL COMMENT '创建人 sys_user.id',
+    updated_by       BIGINT        NOT NULL COMMENT '最后修改人 sys_user.id',
+    created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_stat_rule_code (rule_code),
+    KEY idx_stat_rule_source (data_source_key),
+    CONSTRAINT fk_stat_rule_source FOREIGN KEY (data_source_key)
+        REFERENCES data_source (db_key) ON DELETE CASCADE,
+    CONSTRAINT fk_stat_rule_created_by FOREIGN KEY (created_by)
+        REFERENCES sys_user (id),
+    CONSTRAINT fk_stat_rule_updated_by FOREIGN KEY (updated_by)
+        REFERENCES sys_user (id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '统计规则';
+
+CREATE TABLE IF NOT EXISTS stat_rule_input_field (
+    id                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    rule_id           BIGINT       NOT NULL COMMENT 'stat_rule.id',
+    source_table      VARCHAR(128) NOT NULL COMMENT '来源表名',
+    field_name        VARCHAR(128) NOT NULL COMMENT '字段名',
+    field_description VARCHAR(512)          DEFAULT NULL COMMENT '字段说明',
+    sort_order        INT          NOT NULL DEFAULT 0 COMMENT '展示/使用顺序',
+    created_by        BIGINT       NOT NULL COMMENT '创建人 sys_user.id',
+    updated_by        BIGINT       NOT NULL COMMENT '最后修改人 sys_user.id',
+    created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_stat_rule_field (rule_id, source_table, field_name),
+    CONSTRAINT fk_stat_rule_field_rule FOREIGN KEY (rule_id)
+        REFERENCES stat_rule (id) ON DELETE CASCADE,
+    CONSTRAINT fk_stat_rule_field_created_by FOREIGN KEY (created_by)
+        REFERENCES sys_user (id),
+    CONSTRAINT fk_stat_rule_field_updated_by FOREIGN KEY (updated_by)
+        REFERENCES sys_user (id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '统计规则输入字段';
+
 CREATE TABLE IF NOT EXISTS chat_conversation (
     id              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     user_id         BIGINT       NOT NULL COMMENT '所属用户',

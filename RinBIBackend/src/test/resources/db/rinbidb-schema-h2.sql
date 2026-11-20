@@ -55,6 +55,53 @@ CREATE INDEX IF NOT EXISTS idx_user_data_source_source
     ON user_data_source (data_source_id);
 
 
+CREATE TABLE IF NOT EXISTS stat_rule (
+    id               BIGINT        NOT NULL AUTO_INCREMENT,
+    data_source_key  VARCHAR(64)   NOT NULL,
+    version_no       VARCHAR(32)   NOT NULL,
+    rule_code        VARCHAR(50)   NOT NULL,
+    rule_name        VARCHAR(128)  NOT NULL,
+    rule_description VARCHAR(512)           DEFAULT NULL,
+    formula          VARCHAR(1024)          DEFAULT NULL,
+    business_rule    CLOB                   DEFAULT NULL,
+    remark           VARCHAR(512)           DEFAULT NULL,
+    created_by       BIGINT        NOT NULL,
+    updated_by       BIGINT        NOT NULL,
+    created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_stat_rule_code UNIQUE (rule_code),
+    CONSTRAINT fk_stat_rule_source FOREIGN KEY (data_source_key)
+        REFERENCES data_source (db_key) ON DELETE CASCADE,
+    CONSTRAINT fk_stat_rule_created_by FOREIGN KEY (created_by)
+        REFERENCES sys_user (id),
+    CONSTRAINT fk_stat_rule_updated_by FOREIGN KEY (updated_by)
+        REFERENCES sys_user (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stat_rule_source ON stat_rule (data_source_key);
+
+CREATE TABLE IF NOT EXISTS stat_rule_input_field (
+    id                BIGINT       NOT NULL AUTO_INCREMENT,
+    rule_id           BIGINT       NOT NULL,
+    source_table      VARCHAR(128) NOT NULL,
+    field_name        VARCHAR(128) NOT NULL,
+    field_description VARCHAR(512)          DEFAULT NULL,
+    sort_order        INT          NOT NULL DEFAULT 0,
+    created_by        BIGINT       NOT NULL,
+    updated_by        BIGINT       NOT NULL,
+    created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_stat_rule_field UNIQUE (rule_id, source_table, field_name),
+    CONSTRAINT fk_stat_rule_field_rule FOREIGN KEY (rule_id)
+        REFERENCES stat_rule (id) ON DELETE CASCADE,
+    CONSTRAINT fk_stat_rule_field_created_by FOREIGN KEY (created_by)
+        REFERENCES sys_user (id),
+    CONSTRAINT fk_stat_rule_field_updated_by FOREIGN KEY (updated_by)
+        REFERENCES sys_user (id)
+);
+
 CREATE TABLE IF NOT EXISTS chat_conversation (
     id              BIGINT       NOT NULL AUTO_INCREMENT,
     user_id         BIGINT       NOT NULL,
