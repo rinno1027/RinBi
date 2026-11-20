@@ -448,4 +448,13 @@ agent:
 
 <img width="1915" height="870" alt="ScreenShot_2026-10-22_150400_986" src="https://github.com/user-attachments/assets/a41c69d6-2b98-4f0d-ac97-759b3a0212b8" />
 
+<img width="1894" height="884" alt="RinBI-数据问答助手 (3)" src="https://github.com/user-attachments/assets/e13f4bb0-e6b7-4b1b-989a-1da464aefed8" />
+
+<img width="1916" height="883" alt="RinBI-数据问答助手" src="https://github.com/user-attachments/assets/ef7c43ca-bedb-4e3b-807e-e35363507869" />
+
+<img width="1897" height="874" alt="RinBI-数据问答助手 (4)" src="https://github.com/user-attachments/assets/65d61fa0-f84d-4901-b56d-9d7d37ca014b" />
+
+
+
+
 
