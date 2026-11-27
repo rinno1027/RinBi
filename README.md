@@ -616,6 +616,38 @@ agent:
 
 ## 应用截图
 
+### 数据问答
+<img width="1915" height="880" alt="ScreenShot_2026-11-27_105004_421" src="https://github.com/user-attachments/assets/9002b220-87e1-4963-9746-f9a1f88219b9" />
+
+<img width="1919" height="885" alt="ScreenShot_2026-11-27_105031_579" src="https://github.com/user-attachments/assets/3ebefede-04e9-47e9-9a52-83e4edcd726b" />
+
+### 配置
+<img width="1915" height="889" alt="ScreenShot_2026-11-27_105118_781" src="https://github.com/user-attachments/assets/6ff4d1e3-8983-4803-afde-e32235781adc" />
+<img width="1915" height="885" alt="ScreenShot_2026-11-27_105152_717" src="https://github.com/user-attachments/assets/d7f32c8a-4572-46d1-94cd-e7762a171639" />
+<img width="1905" height="891" alt="ScreenShot_2026-11-27_105239_435" src="https://github.com/user-attachments/assets/f9bff818-b6ec-4d4b-9a24-626d9db0ec40" />
+
+### 智能报表
+<img width="1910" height="984" alt="ScreenShot_2026-11-27_104529_532" src="https://github.com/user-attachments/assets/065ef254-aa08-4e5d-af2e-340b03f2fd91" />
+<img width="1915" height="890" alt="ScreenShot_2026-11-27_104322_928" src="https://github.com/user-attachments/assets/d3b837ca-1bc7-4b75-9765-22aca4103ef6" />
+<img width="1911" height="889" alt="ScreenShot_2026-11-27_104405_694" src="https://github.com/user-attachments/assets/888d81c2-a228-456d-a5b9-5d42580ca1eb" />
+<img width="1919" height="994" alt="ScreenShot_2026-11-27_104505_903" src="https://github.com/user-attachments/assets/d14ac956-745a-4d8c-9e8f-1ac3babd20a5" />
+
+<img width="1915" height="984" alt="ScreenShot_2026-11-27_104706_654" src="https://github.com/user-attachments/assets/2fd21723-7d03-40f2-9004-a93b6cda94ce" />
+<img width="1914" height="990" alt="ScreenShot_2026-11-27_104645_365" src="https://github.com/user-attachments/assets/6c96939e-80a8-4667-ab3c-f32b841b1011" />
+<img width="1915" height="884" alt="ScreenShot_2026-11-27_104745_142" src="https://github.com/user-attachments/assets/2bf61243-dd5b-444e-8fa1-765a471d3004" />
+<img width="1914" height="983" alt="ScreenShot_2026-11-27_104813_494" src="https://github.com/user-attachments/assets/2865ee5d-a525-4577-bbdd-e3067b686a60" />
+<img width="1914" height="986" alt="ScreenShot_2026-11-27_104849_965" src="https://github.com/user-attachments/assets/6b265084-6ad8-49d4-8c8a-a80670adf6bd" />
+
+
+
+
+
+
+
+
+
+
+
 
 
 
