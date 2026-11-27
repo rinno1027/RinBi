@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.rin.agent.AgentStatus;
+import org.rin.report.dto.ReportFileInfo;
+import org.rin.report.dto.ReportTemplateInfo;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,6 +59,36 @@ public class ChatResponse {
      */
     @Builder.Default
     private List<ChartSpec> charts = new ArrayList<>();
+
+    /**
+     * 智能报表生成结果；普通对话消息为 null。
+     */
+    private ReportFileInfo report;
+
+    /**
+     * 智能报表会话绑定的 Excel 模板；普通对话消息为 null。
+     */
+    private ReportTemplateInfo template;
+
+    /**
+     * 本轮报表提示词的字符数（模板结构 + 表结构 + 历史 + 本轮需求）。
+     */
+    private Integer promptChars;
+
+    /**
+     * 单轮提示词字符上限。
+     */
+    private Integer promptLimit;
+
+    /**
+     * 报表会话累计占用的输入字符数（本轮之后）。
+     */
+    private Long inputChars;
+
+    /**
+     * 报表会话累计输入字符上限。
+     */
+    private Integer inputLimit;
 
     private Integer rowCount;
 

@@ -107,7 +107,9 @@ CREATE TABLE IF NOT EXISTS chat_conversation (
     user_id         BIGINT       NOT NULL,
     conversation_id VARCHAR(64)  NOT NULL,
     title           VARCHAR(200) NOT NULL,
+    feature_type    VARCHAR(16)  NOT NULL DEFAULT 'DATA_QA',
     datasource_key  VARCHAR(64)           DEFAULT NULL,
+    input_chars     BIGINT       NOT NULL DEFAULT 0,
     created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -129,4 +131,45 @@ CREATE TABLE IF NOT EXISTS chat_message (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_conversation_updated ON chat_conversation (user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_conversation_feature ON chat_conversation (user_id, feature_type, updated_at);
 CREATE INDEX IF NOT EXISTS idx_chat_message_conversation ON chat_message (conversation_pk, id);
+
+CREATE TABLE IF NOT EXISTS report_file (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id         BIGINT       NOT NULL,
+    conversation_id VARCHAR(64)           DEFAULT NULL,
+    template_id     BIGINT                DEFAULT NULL,
+    file_name       VARCHAR(255) NOT NULL,
+    stored_name     VARCHAR(255) NOT NULL,
+    content_type    VARCHAR(128) NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    file_size       BIGINT       NOT NULL DEFAULT 0,
+    status          VARCHAR(16)  NOT NULL DEFAULT 'READY',
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_report_file_user FOREIGN KEY (user_id)
+        REFERENCES sys_user (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_file_user ON report_file (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS report_template (
+    id              BIGINT        NOT NULL AUTO_INCREMENT,
+    user_id         BIGINT        NOT NULL,
+    conversation_id VARCHAR(64)   NOT NULL,
+    template_name   VARCHAR(255)  NOT NULL,
+    stored_name     VARCHAR(255)  NOT NULL,
+    content_type    VARCHAR(128)  NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    file_size       BIGINT        NOT NULL DEFAULT 0,
+    sheet_summary   VARCHAR(1024)          DEFAULT NULL,
+    plan_json       CLOB                   DEFAULT NULL,
+    status          VARCHAR(16)   NOT NULL DEFAULT 'READY',
+    created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_report_template_conversation UNIQUE (user_id, conversation_id),
+    CONSTRAINT fk_report_template_user FOREIGN KEY (user_id)
+        REFERENCES sys_user (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_template_user ON report_template (user_id, created_at);
+

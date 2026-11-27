@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -51,6 +52,7 @@ public class DatabaseRegistry implements DisposableBean {
     private SecretCipher secretCipher;
 
     private final Map<Long, PoolEntry> pools = new ConcurrentHashMap<>();
+    private final Map<Long, ReentrantLock> poolCreateLocks = new ConcurrentHashMap<>();
 
     /**
      * 列出用户已授权的数据源（不含密码）。
@@ -89,7 +91,7 @@ public class DatabaseRegistry implements DisposableBean {
         DataSourceConfig row = dataSourceMapper.selectOwnedByUser(userId, key);
         if (row == null) {
             if (dataSourceMapper.countEnabledByKey(key) > 0) {
-                throw new ForbiddenException("当前用户无权访问数据源: " + key);
+                throw new BadRequestException("当前用户无权访问此数据源");
             }
             throw new BadRequestException("未配置数据库: " + key
                     + "，可用数据库: " + getKeys(userId));
@@ -97,29 +99,68 @@ public class DatabaseRegistry implements DisposableBean {
         return toDefinition(row, userId);
     }
 
+    /**
+     * 动态获取数据库连接池
+     *
+     * @param definition
+     * @return
+     */
     public DataSource getDataSource(DataSourceDefinition definition) {
-        PoolEntry entry = pools.compute(definition.getId(), (id, existing) -> {
-            if (existing != null && existing.version == definition.getVersion()
-                    && !existing.dataSource.isClosed()) {
-                return existing;
+        if (definition == null || definition.getId() == null) {
+            throw new IllegalArgumentException("数据源定义不完整，缺少数据源 id，无法创建连接池");
+        }
+        Long definitionId = definition.getId();
+        // 同一数据源的建池/重建/销毁都在这把锁内进行，避免并发重复建池后句柄无人关闭。
+        ReentrantLock lock = poolCreateLocks.computeIfAbsent(definitionId, k -> new ReentrantLock(true));
+        try {
+            lock.lock();
+            PoolEntry entry = pools.get(definitionId);
+            if (entry != null && entry.version == definition.getVersion()) {
+                // 配置未变化，直接复用缓存中的连接池。
+                return entry.dataSource;
             }
-            if (existing != null) {
-                closeQuietly(existing.dataSource);
+            // 先建新池、再替换并关闭旧池：创建失败（驱动缺失、URL 错误、初始化脚本报错）时
+            // 旧池仍在缓存里继续服务，不会出现“池已被关闭却仍被 getDataSource 返回”的情况。
+            PoolEntry created = createPoolEntry(definition);
+            pools.put(definitionId, created);
+            if (entry != null) {
+                // Hikari 的 close() 是优雅关闭：在途查询归还连接后才真正断开，不会打断正在执行的 SQL。
+                closeDataSource(entry.dataSource);
+                log.info("数据源配置已更新，连接池已重建: id={}, version={}",
+                        definitionId, definition.getVersion());
             }
-            HikariDataSource created = createDataSource(definition);
-            runInitScript(definition, created);
-            log.info("数据源连接池已就绪: user={}, key={}, dialect={}, url={}",
-                    definition.getUserId(), definition.getKey(),
-                    definition.getDialect(), definition.getJdbcUrl());
-            return new PoolEntry(created, definition.getVersion());
-        });
-        return entry.dataSource;
+            return created.dataSource;
+        } finally {
+            lock.unlock();
+        }
     }
 
+    /**
+     * 创建连接池管理
+     *
+     * @param definition
+     * @return
+     */
+    private PoolEntry createPoolEntry(DataSourceDefinition definition) {
+        HikariDataSource created = createDataSource(definition);
+        runInitScript(definition, created);
+        log.info("数据源连接池已就绪: user={}, key={}, dialect={}, url={}",
+                definition.getUserId(), definition.getKey(),
+                definition.getDialect(), definition.getJdbcUrl());
+        return new PoolEntry(created, definition.getVersion());
+    }
+
+    /**
+     * 连接池创建
+     *
+     * @param definition
+     * @return
+     */
     private HikariDataSource createDataSource(DataSourceDefinition definition) {
+        Long definitionId = definition.getId();
         Class<?> driver = resolveDriver(definition);
         HikariConfig config = new HikariConfig();
-        config.setPoolName("agent-" + definition.getUserId() + "-" + definition.getId());
+        config.setPoolName("agent-" + definition.getUserId() + "-" + definitionId);
         config.setJdbcUrl(definition.getJdbcUrl());
         if (driver != null) {
             config.setDriverClassName(driver.getName());
@@ -150,12 +191,19 @@ public class DatabaseRegistry implements DisposableBean {
         try {
             return Class.forName(driverClass.trim());
         } catch (ClassNotFoundException e) {
+            log.error("数据源 {} 的驱动类不存在: {}", definition.getKey(), driverClass, e);
             throw new IllegalStateException("数据源 " + definition.getKey() + " 的驱动类不存在: "
                     + driverClass + "，请检查 pom.xml 是否已加入对应依赖", e);
         }
     }
 
-    private void runInitScript(DataSourceDefinition definition, DataSource dataSource) {
+    /**
+     * 初始化脚本
+     *
+     * @param definition
+     * @param dataSource
+     */
+    private void runInitScript(DataSourceDefinition definition, HikariDataSource dataSource) {
         if (!StringUtils.hasText(definition.getInitScript())) {
             return;
         }
@@ -170,6 +218,9 @@ public class DatabaseRegistry implements DisposableBean {
             populator.execute(dataSource);
             log.info("数据源 {} 初始化脚本执行完成: {}", definition.getKey(), script);
         } catch (Exception e) {
+            log.error("数据源 {} 初始化脚本执行失败: script={}", definition.getKey(), script, e);
+            // 报错则关闭连接池，防止泄露
+            closeDataSource(dataSource);
             throw new IllegalStateException("数据源 " + definition.getKey()
                     + " 初始化脚本执行失败: " + script, e);
         }
@@ -182,10 +233,18 @@ public class DatabaseRegistry implements DisposableBean {
         if (dataSourceId == null) {
             return;
         }
-        PoolEntry removed = pools.remove(dataSourceId);
-        if (removed != null) {
-            closeQuietly(removed.dataSource);
-            log.info("数据源连接池已失效: id={}", dataSourceId);
+        // 与 getDataSource 共用同一把锁：避免“旧池刚被关闭、另一个线程又把按旧配置建的池写回缓存”，
+        // 也避免同一个数据源被并发建出两个池后其中一个句柄丢失。
+        ReentrantLock lock = poolCreateLocks.computeIfAbsent(dataSourceId, k -> new ReentrantLock(true));
+        try {
+            lock.lock();
+            PoolEntry removed = pools.remove(dataSourceId);
+            if (removed != null) {
+                closeDataSource(removed.dataSource);
+                log.info("数据源连接池已失效: id={}", dataSourceId);
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -195,6 +254,8 @@ public class DatabaseRegistry implements DisposableBean {
 
     private DataSourceDefinition toDefinition(DataSourceConfig row, Long userId) {
         String dbType = normalizeType(row.getDbType());
+        String jdbcUrl = buildJdbcUrl(row, dbType);
+        String driverClassName = resolveDriverClassName(row, dbType);
         return DataSourceDefinition.builder()
                 .id(row.getId())
                 .userId(userId)
@@ -203,8 +264,8 @@ public class DatabaseRegistry implements DisposableBean {
                 .description(row.getDescription())
                 .dbType(dbType)
                 .dialect(StringUtils.hasText(row.getDialect()) ? row.getDialect() : dbType)
-                .jdbcUrl(buildJdbcUrl(row, dbType))
-                .driverClassName(resolveDriverClassName(row, dbType))
+                .jdbcUrl(jdbcUrl)
+                .driverClassName(driverClassName)
                 .username(row.getUsername())
                 .password(secretCipher.decrypt(row.getPassword()))
                 .readOnly(row.getReadOnly() == null || Boolean.TRUE.equals(row.getReadOnly()))
@@ -288,11 +349,9 @@ public class DatabaseRegistry implements DisposableBean {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private void closeQuietly(HikariDataSource dataSource) {
-        try {
+    private void closeDataSource(HikariDataSource dataSource) {
+        if(!dataSource.isClosed()){
             dataSource.close();
-        } catch (Exception e) {
-            log.warn("关闭旧数据源连接池失败: {}", e.getMessage());
         }
     }
 
@@ -300,13 +359,15 @@ public class DatabaseRegistry implements DisposableBean {
     public void destroy() {
         for (Map.Entry<Long, PoolEntry> entry : pools.entrySet()) {
             try {
-                entry.getValue().dataSource.close();
+                closeDataSource(entry.getValue().dataSource);
                 log.info("数据源连接池已关闭: id={}", entry.getKey());
             } catch (Exception e) {
                 log.warn("关闭数据源连接池失败: id={}", entry.getKey(), e);
             }
         }
         pools.clear();
+        // 锁表只保留到进程退出：清空后即使容器/测试上下文重复关闭也不会残留引用。
+        poolCreateLocks.clear();
     }
 
     private static final class PoolEntry {

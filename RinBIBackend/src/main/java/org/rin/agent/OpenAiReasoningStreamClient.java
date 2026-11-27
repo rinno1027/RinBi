@@ -11,6 +11,8 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import org.rin.agent.dto.ReasoningStreamResult;
 import org.rin.config.AgentProperties;
 import org.rin.config.OpenAiChatModelOptions;
+import org.rin.exception.ChatCancelledException;
+import org.rin.task.ChatTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -57,6 +59,15 @@ public class OpenAiReasoningStreamClient implements ReasoningStreamClient {
     @Override
     public ReasoningStreamResult stream(String systemPrompt, String userPrompt,
                                         Consumer<String> onReasoning, Consumer<String> onToken) {
+        // 调用方（如 LlmService）在线程上绑定了 ChatTask，这里直接取当前任务，
+        // 既保持接口简单，又能在取消时立即结束等待。
+        return stream(systemPrompt, userPrompt, onReasoning, onToken, ChatTask.currentOrNull());
+    }
+
+    @Override
+    public ReasoningStreamResult stream(String systemPrompt, String userPrompt,
+                                        Consumer<String> onReasoning, Consumer<String> onToken,
+                                        ChatTask task) {
         StringBuilder reasoning = new StringBuilder();
         StringBuilder content = new StringBuilder();
         CountDownLatch completed = new CountDownLatch(1);
@@ -70,6 +81,10 @@ public class OpenAiReasoningStreamClient implements ReasoningStreamClient {
             reasoningChatModel.chat(request, new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
+                    // 任务已取消：忽略后续分片，避免继续向前端推送并累积 token。
+                    if (task != null && task.isCancelled()) {
+                        return;
+                    }
                     if (partialResponse == null || partialResponse.isEmpty()) {
                         return;
                     }
@@ -79,6 +94,9 @@ public class OpenAiReasoningStreamClient implements ReasoningStreamClient {
 
                 @Override
                 public void onPartialThinking(PartialThinking partialThinking) {
+                    if (task != null && task.isCancelled()) {
+                        return;
+                    }
                     String chunk = partialThinking == null ? null : partialThinking.text();
                     if (!StringUtils.hasText(chunk)) {
                         return;
@@ -98,11 +116,18 @@ public class OpenAiReasoningStreamClient implements ReasoningStreamClient {
                     completed.countDown();
                 }
             });
+        } catch (ChatCancelledException e) {
+            throw e;
         } catch (RuntimeException e) {
+            if (task != null && task.isCancelled()) {
+                // 取消会中断 HTTP 读取并让底层客户端抛异常，这类异常按“已停止”处理。
+                throw new ChatCancelledException();
+            }
+            log.error("调用推理模型失败: {}", safeMessage(e), e);
             throw new IllegalStateException("调用推理模型失败: " + safeMessage(e), e);
         }
 
-        awaitCompletion(completed);
+        awaitCompletion(completed, task);
 
         Throwable error = failure.get();
         if (error != null) {
@@ -153,17 +178,26 @@ public class OpenAiReasoningStreamClient implements ReasoningStreamClient {
     }
 
     /**
-     * 阻塞等待流结束；超时或线程被中断时抛出异常，避免请求线程永久挂起。
+     * 阻塞等待流结束；超时、线程被中断或被取消时抛出异常，避免请求线程永久挂起。
      */
-    private void awaitCompletion(CountDownLatch completed) {
+    private void awaitCompletion(CountDownLatch completed, ChatTask task) {
         int timeoutSeconds = resolveTimeoutSeconds(properties.getLlm().getTimeoutSeconds());
         try {
             // 比模型自身的读取超时多留一点余量，正常情况下由模型先触发 onError/onComplete。
-            if (!completed.await(timeoutSeconds + 30L, TimeUnit.SECONDS)) {
+            long waitSeconds = timeoutSeconds + 30L;
+            if (task == null) {
+                if (!completed.await(waitSeconds, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("推理模型响应超时（超过 " + timeoutSeconds + " 秒）");
+                }
+                return;
+            }
+            if (!task.awaitCancellable(completed, waitSeconds, TimeUnit.SECONDS)) {
+                // 取消状态会在等待期间抛出 ChatCancelledException，这里只剩超时。
                 throw new IllegalStateException("推理模型响应超时（超过 " + timeoutSeconds + " 秒）");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            log.warn("推理模型调用被中断", e);
             throw new IllegalStateException("推理模型调用被中断", e);
         }
     }

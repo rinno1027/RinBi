@@ -1,6 +1,8 @@
 package org.rin.db;
 
 import org.rin.config.AgentProperties;
+import org.rin.exception.ChatCancelledException;
+import org.rin.task.ChatTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,6 +59,11 @@ public class QueryExecutor {
     public QueryResult execute(Long userId, String databaseKey, String rawSql) {
         // 二次校验，确保任何调用方都无法绕过只读限制。
         String sql = sqlGuard.validate(rawSql);
+        ChatTask task = ChatTask.currentOrNull();
+        if (task != null) {
+            // 已经取消的请求不再占用数据库连接。
+            task.throwIfCancelled();
+        }
         AgentProperties.Sql config = properties.getSql();
         int maxRows = Math.max(1, config.getMaxRows());
         int maxChars = Math.max(1, config.getMaxResultChars());
@@ -69,23 +76,54 @@ public class QueryExecutor {
         try (Connection connection = dataSource.getConnection()) {
             setReadOnly(connection);
             try (Statement statement = connection.createStatement()) {
+                // 登记取消动作：用户点击停止或 SSE 断开时直接取消语句，尽快归还数据库连接。
+                registerCancellation(statement);
                 statement.setMaxRows(maxRows + 1);
                 statement.setQueryTimeout(queryTimeout);
                 try {
                     statement.setFetchSize(100);
-                } catch (SQLException ignored) {
+                } catch (SQLException e) {
                     // 部分驱动不支持 fetchSize，不影响查询。
+                    log.debug("设置 fetchSize 失败（驱动不支持时忽略）: {}", safeMessage(e));
                 }
                 try (ResultSet resultSet = statement.executeQuery(sql)) {
                     return readResult(resolvedKey, sql, resultSet, maxRows, maxChars, start);
                 }
             }
         } catch (SQLException e) {
+            if (task != null && task.isCancelled()) {
+                // 取消会让语句被中断（如 PostgreSQL 的 SQLState 57014），按“已停止”处理，
+                // 既不重试也不当作查询失败上报。
+                throw new ChatCancelledException();
+            }
             if (isRecoverable(e)) {
+                log.warn("数据库查询出现瞬时异常，将按配置重试: database={}, sqlState={}, error={}",
+                        resolvedKey, e.getSQLState(), safeMessage(e));
                 throw new RecoverableDataAccessException("数据库连接/查询瞬时失败: " + safeMessage(e), e);
             }
+            log.error("数据库查询失败: database={}, sql={}", resolvedKey, sql, e);
             throw new SqlExecutionException("数据库查询失败: " + safeMessage(e), e);
         }
+    }
+
+    /**
+     * 把语句登记到当前任务的取消动作里。
+     *
+     * <p>任务（{@link ChatTask#currentOrNull()}）被取消时执行 {@link Statement#cancel()}，
+     * 让长时间运行的查询立即结束并释放连接；语句已关闭时的失败直接忽略。</p>
+     */
+    private void registerCancellation(Statement statement) {
+        ChatTask task = ChatTask.currentOrNull();
+        if (task == null) {
+            return;
+        }
+        task.onCancel(() -> {
+            try {
+                statement.cancel();
+            } catch (SQLException e) {
+                log.debug("取消数据库语句失败（语句可能已关闭）: {}", safeMessage(e));
+            }
+        });
     }
 
     private QueryResult readResult(String databaseKey, String sql, ResultSet resultSet,
@@ -172,6 +210,7 @@ public class QueryExecutor {
         try {
             return resultSet.getObject(index);
         } catch (SQLException e) {
+            log.debug("按对象读取第 {} 列失败，回退为字符串读取: {}", index, safeMessage(e));
             return resultSet.getString(index);
         }
     }
@@ -247,9 +286,20 @@ public class QueryExecutor {
         return false;
     }
 
+    /**
+     * 重试耗尽后的兜底方法。
+     *
+     * <p>签名必须与 {@link #execute} 完全对应：异常参数 + 原方法的全部参数。
+     * 缺少任何一个参数，Spring Retry 都匹配不到恢复方法，只会抛出
+     * {@code ExhaustedRetryException("Cannot locate recovery method")}，
+     * 真正导致查询失败的数据库异常会被完全掩盖。</p>
+     */
     @Recover
-    public QueryResult recover(RecoverableDataAccessException e, String databaseKey, String rawSql) {
-        throw new SqlExecutionException("数据库查询重试后仍然失败: " + safeMessage(e), e);
+    public QueryResult recover(RecoverableDataAccessException e, Long userId, String databaseKey,
+                               String rawSql) {
+        log.error("数据库查询重试后仍然失败: userId={}, database={}, sql={}",
+                userId, databaseKey, rawSql, e);
+        throw new SqlExecutionException("数据库查询重试失败", e);
     }
 
     private String safeMessage(Throwable throwable) {

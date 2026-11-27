@@ -1,6 +1,6 @@
 {
   "name": "rinbi-frontend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "RinBI 数据问答助手前端（Vue 3 + Vite + Element Plus）",

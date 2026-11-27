@@ -2,7 +2,7 @@
 
 [中文](./README.md) | [English](./README.en.md)
 
-RinBI 数据问答助手的前端，基于 Vue 3 + Vite + Element Plus。用户登录后选择自己的数据源，用自然语言提问；页面通过 SSE 实时展示思考过程与答案，并在查询成功后渲染结果表格、SQL 和多个 ECharts 图表。历史会话保存在后端，可在侧栏恢复或删除；登录用户还可以按数据源维护统计规则，在提问时勾选需要遵循的业务口径。新用户可以提交注册申请，管理员在控制台审批账号，先统一配置数据源，再通过授权弹框勾选用户可访问的数据库。
+RinBI 数据问答助手的前端，基于 Vue 3 + Vite + Element Plus。登录后可在页面顶部切换 **数据问答** 与 **智能报表** 两个功能：数据问答用自然语言提问，通过 SSE 实时展示思考过程与答案，并渲染结果表格、SQL 与多个 ECharts 图表；智能报表先上传 Excel 模板（模板保存在服务器，可再次下载），再描述需求生成报表，并可在同一会话里多轮要求模型调整报表内容，每轮输出新的 Excel 文件。两个功能的会话与历史彼此独立，均可在侧栏恢复或删除；登录用户还可以按数据源维护统计规则，在提问与报表时勾选需要遵循的业务口径。新用户可以提交注册申请，管理员在控制台审批账号，先统一配置数据源，再通过授权弹框勾选用户可访问的数据库。
 
 ## 技术栈
 
@@ -41,28 +41,29 @@ npm run dev
 
 ```text
 src/
-├─ App.vue                    # 登录态、会话状态、SSE 消息流、历史面板、数据源切换
+├─ App.vue                    # 登录态、功能切换、会话状态、SSE 消息流、报表模板与历史面板
 ├─ main.js                    # 应用入口
 ├─ api/
 │  ├─ http.js                 # API_BASE、请求封装、ApiError、401 统一处理
 │  ├─ auth.js                 # 注册申请、登录、当前用户、退出
 │  ├─ admin.js                # 用户分页/审批、数据源分页增删改查、用户授权
-│  ├─ history.js              # 历史会话列表、详情、删除
+│  ├─ history.js              # 历史会话列表（按 DATA_QA / REPORT 过滤）、详情、删除
 │  ├─ rules.js                # 统计规则分页/详情/候选项与增删改
+│  ├─ report.js               # 模板上传/下载、报表会话调整、报表文件下载
 │  └─ agent.js                # 健康检查、数据源、SSE 聊天、清空会话
 ├─ components/
 │  ├─ LoginView.vue           # 登录 / 注册申请、表单校验与错误提示
 │  ├─ AdminPanel.vue          # 管理员用户分页、审批与启停控制台
 │  ├─ DataSourcePanel.vue     # 管理员数据源分页、增删改查与用户授权控制台
 │  ├─ RulePanel.vue           # 统计规则列表、筛选、新增/编辑/删除与输入字段维护
-│  ├─ ChatMessage.vue         # 单条回答、Markdown、图表与表格编排
+│  ├─ ChatMessage.vue         # 单条回答、Markdown、图表、表格、模板与报表下载卡片
 │  ├─ ChartPanel.vue          # 多个 ChartSpec -> ECharts option
 │  ├─ ChartCanvas.vue         # ECharts 实例生命周期与自适应
 │  └─ QueryResultTable.vue    # 结果表格、分页与 SQL 追溯
-├─ styles/                    # 基础样式、聊天布局、登录/历史、管理员控制台、统计规则、组件与响应式
+├─ styles/                    # 基础样式、聊天布局、登录/历史/模板面板、管理员控制台、统计规则与响应式
 └─ utils/
    ├─ session.js              # localStorage token、请求头、401 事件
-   ├─ format.js               # 时间、耗时、状态格式化
+   ├─ format.js               # 时间、耗时、状态格式化、功能类型与会话 id 生成
    └─ markdown.js             # Markdown 渲染、HTML 清洗、剥离 chart 代码块
 ```
 
@@ -131,11 +132,26 @@ sequenceDiagram
 
 ### 历史会话
 
-- 侧栏通过 `GET /api/history/conversations?limit=50` 加载最近会话，展示标题、数据源与更新时间；
-- 点击会话调用 `GET /api/history/conversations/{id}`，把用户消息与助手 `response` 解析为 `ChatMessage` 所需的 `{ answer, status, reasoning }`，恢复 Markdown、表格、图表与 SQL，并设置当前 `conversationId` 以支持继续追问；
-- 删除调用 `DELETE /api/history/conversations/{id}`；若删除的是当前会话，会同时重置聊天区；
+- 侧栏通过 `GET /api/history/conversations?limit=50&feature=...` 加载最近会话，展示标题、数据源与更新时间；`feature` 由当前功能决定（数据问答 `DATA_QA` / 智能报表 `REPORT`），两个功能的历史互不混排；
+- 点击会话调用 `GET /api/history/conversations/{id}`，把用户消息与助手 `response` 解析为 `ChatMessage` 所需的 `{ answer, status, reasoning }`，恢复 Markdown、表格、图表、SQL 与报表 / 模板下载卡片，并设置当前功能的 `conversationId` 以支持继续追问；
+- 报表会话的详情还包含 `featureType`、`template`、`inputChars` 与 `inputLimit`，恢复时会同步模板面板与“上下文占用”展示；
+- 删除调用 `DELETE /api/history/conversations/{id}`；若删除的是当前会话，会同时重置聊天区；删除报表会话时后端会一并清理模板记录与模板文件；
 - 页面加载时若存在上次的 `conversationId`，会静默尝试恢复；会话已不存在（`404`）则从列表移除并重置；
-- 每轮问答完成后自动刷新历史列表，新会话出现在最上方。
+- 每轮问答 / 报表完成后自动刷新历史列表，新会话出现在最上方。
+
+### 智能报表
+
+- 顶部标签切换功能后，报表会话使用独立的 `reportConversationId`（`rep-` 前缀）与独立历史列表；
+- 侧栏「报表模板」面板展示当前会话绑定的模板、结构摘要与“上下文占用 x / y 字符”，并提供模板下载与「我导入过的模板」列表（`GET /api/report/templates`）；
+- 一个会话只允许一个模板：已导入模板时再点「更换模板」会提示“新建会话并上传”，原会话历史保留。
+
+## 中途停止生成
+
+- 数据问答与智能报表生成期间，发送按钮区域会切换成「停止」按钮（点击后显示「停止中…」并禁用），调用 `POST /api/agent/conversations/{conversationId}/stop` 取消后端任务；
+- 数据问答走 SSE：后端取消成功后会推送 `stopped` 事件，`sendQuestion` 以 `code === 'STOPPED'` 的 `ApiError` 结束；报表走同步接口，被取消时返回 `409` 且响应体 `code` 为 `STOPPED`。两条链路都由 `markStreamingStopped` / `catch` 分支把消息标记为 `stopped`；
+- 已生成的部分内容保留在当前页面，`ChatMessage` 会显示「已停止生成」提示与“停止后本轮不会写入历史”的说明；本轮不写入会话历史，因此不刷新历史列表，也不计入报表会话的上下文占用（`inputChars` 由后端在成功生成后才累加）；
+- 关闭页面、刷新或组件卸载时，`App.vue` 的 `beforeunload` 监听会通过 `stopOnUnload` 以 `keepalive: true` 的 `fetch` 尽力取消后端任务，避免浏览器已断开连接而后端继续消耗模型 token 与数据库连接；
+- 停止接口幂等：任务已结束时返回 `204`，前端仍按“已停止”展示；若点击停止的瞬间本轮恰好完成，`done` 响应会把消息恢复为正常完成状态。
 
 ## 多图表渲染
 
@@ -267,6 +283,17 @@ sequenceDiagram
 - 同一时间只允许一个请求：`sending` 为真时输入框与发送按钮禁用。
 - 点击示例问题只填入输入框并聚焦，不自动发送，避免误触。
 - 选择具体数据源后，前端会加载并默认全选该数据源的统计规则；发送时以 `ruleIds` 附带，自动选择数据源时不发送该字段。
+
+### 智能报表上传与多轮调整
+
+1. 切换到顶部「智能报表」标签，点击「上传模板」（空态 hero 或输入框旁按钮），选择 `.xlsx` / `.xls` 模板。若当前报表会话已有模板，会先二次确认“新建会话并上传”。
+2. 前端校验扩展名与 10MB 上限后调用 `POST /api/report/templates`（`multipart/form-data`），携带 `file` 与 `conversationId`；后端保存模板并创建报表会话。
+3. 上传成功后以服务端记录静默恢复该会话，消息区展示「模板已导入」与模板下载卡片（`ChatMessage` 渲染），侧栏同步模板名称、结构摘要与上下文占用。
+4. 在输入框描述需求后点击「发送」，调用 `POST /api/report/chat`（JSON），携带 `conversationId`、`templateId`、`question`、`database` 与 `ruleIds`。`ruleIds` 复用左侧统计规则选择：只有显式选择数据源时才提交。
+5. 报表生成期间复用 `sending` 状态，输入框、发送按钮、规则选择与模板上传均禁用，避免并发请求；占位消息提示“正在解析模板、规划取数并回填 Excel…”。
+6. 响应结构与 `/api/agent/chat` 的 `done` 事件一致，`report` 携带 `fileId`、`fileName`、`downloadUrl` 等信息，`template` 携带模板信息，`promptChars` / `inputChars` / `inputLimit` 用于更新“上下文占用”；下载时先带 token 获取 Blob 再保存文件。
+7. 生成后可以继续发送调整要求（更换维度、增删列、修改统计口径等），同一会话每轮都会产出新的 Excel 文件；未要求修改的部分通常保持原有别名与坐标。
+8. 当后端返回 `400 / INPUT_LIMIT` 时，页面提示“当前会话已达模型输入上限”，并引导点击「上传模板」新建会话、重新上传模板。
 
 ### 清空会话
 

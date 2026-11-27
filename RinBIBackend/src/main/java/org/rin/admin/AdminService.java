@@ -20,6 +20,8 @@ import org.rin.exception.BadRequestException;
 import org.rin.exception.ForbiddenException;
 import org.rin.exception.NotFoundException;
 import org.rin.security.SecretCipher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,7 @@ import java.util.regex.Pattern;
 @Service
 public class AdminService {
 
+    private static final Logger log = LoggerFactory.getLogger(AdminService.class);
     private static final Pattern DB_KEY_PATTERN =
             Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
     private static final int DEFAULT_MAX_POOL_SIZE = 3;
@@ -213,6 +216,7 @@ public class AdminService {
         try {
             dataSourceConfigMapper.insert(row);
         } catch (DuplicateKeyException e) {
+            log.warn("数据源 key 重复，创建失败: key={}", dbKey, e);
             throw new BadRequestException("已存在数据源 key: " + dbKey);
         }
         return AdminDataSourceView.from(row);

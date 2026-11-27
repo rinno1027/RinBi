@@ -23,6 +23,7 @@ public class AgentProperties {
     private Auth auth = new Auth();
     private Security security = new Security();
     private Bootstrap bootstrap = new Bootstrap();
+    private Report report = new Report();
 
     @Data
     public static class Llm {
@@ -160,5 +161,52 @@ public class AgentProperties {
         private String adminPassword;
         private String adminDisplayName;
         private Boolean demoDatasourceEnabled = true;
+    }
+
+    /**
+     * 智能报表配置，对应 agent.report.*。
+     */
+    @Data
+    public static class Report {
+        /**
+         * 生成文件的保存目录；相对路径基于应用启动目录。
+         */
+        private String storageDir = "data/reports";
+        /**
+         * 模板上传大小上限（字节），默认 10MB；需同时调整 multipart 限制。
+         */
+        private Long maxUploadBytes = 10L * 1024 * 1024;
+        /**
+         * 模板解析时最多读取的行数，避免超大模板拖慢提示词构造。
+         */
+        private Integer maxTemplateRows = 200;
+        /**
+         * 模板解析时最多读取的列数。
+         */
+        private Integer maxTemplateColumns = 60;
+        /**
+         * 单个表格区域最多回填的数据行数。
+         */
+        private Integer maxFillRows = 5000;
+        /**
+         * 单次报表最多允许执行的 SQL 条数。
+         */
+        private Integer maxSqlCount = 5;
+        /**
+         * 生成文件保留天数；小于等于 0 表示不自动清理过期记录。
+         */
+        private Integer retentionDays = 7;
+        /**
+         * 单轮报表提示词（模板结构 + 表结构 + 历史 + 本轮需求）的最大字符数。
+         */
+        private Integer maxPromptChars = 30_000;
+        /**
+         * 同一报表会话累计可用的输入字符预算；超出后需要新建会话并重新上传模板。
+         */
+        private Integer maxConversationChars = 120_000;
+        /**
+         * 生成报表时最多带上的历史问答轮数，避免多轮调整时上下文无限增长。
+         */
+        private Integer historyExchanges = 4;
     }
 }

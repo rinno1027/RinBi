@@ -309,6 +309,138 @@
   line-height: 1.6;
 }
 
+/* ---------------- 功能切换（数据问答 / 智能报表） ---------------- */
+.feature-switch {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(124, 240, 210, 0.24);
+  border-radius: 12px;
+  background: rgba(12, 26, 44, 0.4);
+}
+
+.feature-switch button {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #b9cbe0;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.feature-switch button:hover {
+  color: #eafffa;
+}
+
+.feature-switch button.active {
+  background: rgba(83, 211, 184, 0.22);
+  color: #eafffa;
+}
+
+/* ---------------- 报表模板面板 ---------------- */
+.template-current {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d9e7fb;
+  border-radius: 11px;
+  background: var(--brand-soft);
+}
+
+.template-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-meta {
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.template-download {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border: 1px solid #b9d3f6;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.template-download:hover:not(:disabled) {
+  background: #eef5ff;
+}
+
+.template-download:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.template-usage {
+  margin: 8px 0 0;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-history {
+  margin-top: 10px;
+}
+
+.template-history-title {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.template-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  text-align: left;
+}
+
+.template-main:hover {
+  border-color: #c9d9f7;
+  background: var(--brand-soft);
+}
+
+.history-tag {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   /* 移动端侧栏只保留数据源与历史对话两个面板。 */
   .side-panel .panel-card.history-card {

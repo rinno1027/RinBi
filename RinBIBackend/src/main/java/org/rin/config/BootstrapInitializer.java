@@ -109,7 +109,9 @@ public class BootstrapInitializer implements ApplicationRunner {
             demo.setDriverClassName("org.h2.Driver");
             demo.setUsername("sa");
             demo.setPassword(secretCipher.encrypt(""));
-            demo.setDialect("mysql");
+            // 演示库实际是 H2，MODE=MySQL 只是兼容模式（并不提供 DATE_FORMAT 等函数），
+            // 因此这里记录真实产品 h2，避免提示词里给出错误的方言信息。
+            demo.setDialect("h2");
             demo.setReadOnly(true);
             demo.setMaxPoolSize(4);
             demo.setConnectionTimeoutMillis(10_000L);

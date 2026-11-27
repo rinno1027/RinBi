@@ -8,9 +8,11 @@ import org.rin.agent.dto.ReasoningStreamResult;
 import org.rin.config.AgentProperties;
 import org.rin.db.*;
 import org.rin.exception.BadRequestException;
+import org.rin.exception.ChatCancelledException;
 import org.rin.history.HistoryService;
 import org.rin.history.HistoryService.HistoryExchange;
 import org.rin.rule.StatRuleService;
+import org.rin.task.ChatTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -98,8 +100,7 @@ public class AgentService {
         List<String> availableDatabases = databaseRegistry.getKeys(userId);
         String requestedDatabase = normalize(request.getDatabase());
         if (requestedDatabase != null && !availableDatabases.contains(requestedDatabase)) {
-            throw new BadRequestException("未配置数据库: " + requestedDatabase
-                    + "，可用数据库: " + availableDatabases);
+            throw new BadRequestException("数据源不存在: " + requestedDatabase);
         }
 
         String conversationId = normalize(request.getConversationId());
@@ -131,20 +132,38 @@ public class AgentService {
      * 执行已通过 {@link #prepare(Long, ChatRequest)} 校验的请求。
      */
     public ChatResponse execute(Long userId, ChatRequest prepared, ChatStreamListener listener) {
+        return execute(userId, prepared, listener, null);
+    }
+
+    /**
+     * 执行已通过 {@link #prepare(Long, ChatRequest)} 校验的请求，并支持中途取消。
+     *
+     * <p>{@code task} 由 {@link org.rin.task.ChatTaskRegistry} 创建：用户点击停止、
+     * 关闭页面或 SSE 断开时会被取消，各阶段检查点与模型等待期间都会抛出
+     * {@link ChatCancelledException}，立即停止后续的模型调用与 SQL 执行。</p>
+     */
+    public ChatResponse execute(Long userId, ChatRequest prepared, ChatStreamListener listener,
+                                ChatTask task) {
         long start = System.currentTimeMillis();
         String conversationId = prepared.getConversationId();
         ChatResponse response;
         try {
             response = doChat(userId, prepared.getQuestion(), prepared.getDatabase(),
-                    conversationId, start, listener, prepared.getRulePromptJson());
+                    conversationId, start, listener, prepared.getRulePromptJson(), task);
+        } catch (ChatCancelledException e) {
+            // 取消不写入会话记忆与历史记录，直接交给上层关闭 SSE。
+            throw e;
         } catch (BadRequestException e) {
             throw e;
         } catch (UnsafeSqlException e) {
+            log.warn("查询被安全策略拦截: database={}, reason={}",
+                    prepared.getDatabase(), e.getMessage());
             response = failure(conversationId, AgentStatus.UNSAFE_SQL, "查询被安全策略拦截",
                     e.getMessage(), start);
             sanitizeReason(userId, prepared.getDatabase(), response);
         } catch (SqlExecutionException e) {
-            log.warn("查询执行失败: {}", e.getMessage());
+            log.warn("查询执行失败: database={}, error={}",
+                    prepared.getDatabase(), e.getMessage(), e);
             response = failure(conversationId, AgentStatus.ERROR, "查询执行失败，请稍后重试",
                     e.getMessage(), start);
             // 数据库异常常带出真实表名/字段名，返回给前端前同样做业务名替换。
@@ -161,7 +180,8 @@ public class AgentService {
 
     private ChatResponse doChat(Long userId, String question, String requestedDatabase,
                                 String conversationId, long start,
-                                ChatStreamListener listener, String rulePromptJson) {
+                                ChatStreamListener listener, String rulePromptJson,
+                                ChatTask task) {
         String schemaText = requestedDatabase == null
                 ? schemaService.getAllSchemas(userId)
                 : schemaService.getSchema(userId, requestedDatabase);
@@ -169,8 +189,10 @@ public class AgentService {
         String historyText = conversationMemory.getHistoryText(
                 ConversationMemory.memoryKey(userId, conversationId));
 
+        throwIfCancelled(task);
         QueryPlan plan = llmService.plan(question, requestedDatabase, schemaText,
-                historyText, rulePromptJson);
+                historyText, rulePromptJson, task);
+        throwIfCancelled(task);
         if (!plan.isFeasiblePlan()) {
             String reason = StringUtils.hasText(plan.getReason())
                     ? plan.getReason().trim() : "当前数据无法支持该问题";
@@ -205,6 +227,7 @@ public class AgentService {
         try {
             safeSql = sqlGuard.validate(plan.getSql());
         } catch (UnsafeSqlException e) {
+            log.warn("生成的 SQL 未通过只读校验: database={}, reason={}", databaseKey, e.getMessage());
             ChatResponse response = baseResponse(conversationId, AgentStatus.UNSAFE_SQL,
                     "该请求生成了非只读 SQL，已被安全策略拦截。请改为查询类问题。",
                     e.getMessage(), start);
@@ -216,7 +239,9 @@ public class AgentService {
             return response;
         }
 
+        throwIfCancelled(task);
         QueryResult result = queryExecutor.execute(userId, databaseKey, safeSql);
+        throwIfCancelled(task);
         if (result.isTooLarge()) {
             int maxChars = properties.getSql().getMaxResultChars() == null
                     ? 30000 : properties.getSql().getMaxResultChars();
@@ -262,21 +287,27 @@ public class AgentService {
                 ReasoningStreamResult formatted = llmService.formatWithReasoning(
                         question, table, result.getRowCount(), result.isTruncated(), false,
                         chunk -> notifyReasoning(listener, reasoningStream.accept(chunk)),
-                        chunk -> notifyToken(listener, answerStream.accept(chunk)));
+                        chunk -> notifyToken(listener, answerStream.accept(chunk)), task);
                 answer = formatted.getContent();
                 response.setReasoning(formatted.getReasoning());
             } else {
                 answer = llmService.format(question, table, result.getRowCount(),
-                        result.isTruncated(), false);
+                        result.isTruncated(), false, task);
             }
+        } catch (ChatCancelledException e) {
+            // 取消不能被下面的“本地表格回退”吞掉，否则会继续生成并把答案写进历史。
+            throw e;
         } catch (RuntimeException e) {
             log.warn("结果整理失败，使用本地 Markdown 表格回退: {}", e.getMessage());
             answer = fallbackMarkdown(table, result.getRowCount(), result.isTruncated());
             warnings.add("模型整理结果失败，已返回系统生成的表格");
         } finally {
-            // 输出被流式清洗器保留下来的最后一个标识符，保证前端拼接结果与最终答案一致。
-            notifyReasoning(listener, reasoningStream.flush());
-            notifyToken(listener, answerStream.flush());
+            // 输出被流式清洗器保留下来的最后一个标识符，保证前端拼接结果与最终答案一致；
+            // 任务已取消时连接可能已经断开，不再向前端推送。
+            if (task == null || !task.isCancelled()) {
+                notifyReasoning(listener, reasoningStream.flush());
+                notifyToken(listener, answerStream.flush());
+            }
         }
 
         // 解析答案末尾的 chart 代码块：剥离原始 JSON，只把校验通过的图表描述下发。
@@ -305,6 +336,15 @@ public class AgentService {
                 conversationId, databaseKey, result.getRowCount(), response.getCharts().size(),
                 System.currentTimeMillis() - start);
         return response;
+    }
+
+    /**
+     * 阶段检查点：任务已取消时立即中断，避免继续调用模型或执行 SQL。
+     */
+    private void throwIfCancelled(ChatTask task) {
+        if (task != null) {
+            task.throwIfCancelled();
+        }
     }
 
     /**

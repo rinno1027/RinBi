@@ -17,6 +17,7 @@
             <el-tag v-if="isStreaming" size="small" type="info" effect="light">
               {{ isThinking ? '思考中' : '生成中' }}
             </el-tag>
+            <el-tag v-else-if="stopped" size="small" type="warning" effect="plain">已停止</el-tag>
             <el-tag v-else-if="status" size="small" :type="meta.type" effect="light">
               {{ meta.label }}
             </el-tag>
@@ -34,10 +35,22 @@
             <p v-if="errorDetail" class="error-code">{{ errorDetail }}</p>
           </el-alert>
 
+          <el-alert
+            v-if="stopped"
+            type="info"
+            :closable="false"
+            show-icon
+            title="已停止生成"
+          >
+            <p class="stop-hint">本轮内容不会保存到历史记录，已生成的部分仍保留在当前页面。</p>
+          </el-alert>
+
           <div v-if="isStreaming && !answerHtml && !hasReasoning" class="stream-placeholder">
             <span class="typing-dots"><i></i><i></i><i></i></span>
             <span>
-              {{ response.sql ? '正在连接推理模型…' : '正在理解问题、规划并执行只读查询…' }}
+              {{ isReportPending
+                ? '正在解析模板、规划取数并回填 Excel…'
+                : response.sql ? '正在连接推理模型…' : '正在理解问题、规划并执行只读查询…' }}
             </span>
           </div>
 
@@ -85,6 +98,49 @@
               :class="{ 'is-streaming': isStreaming }"
               v-html="answerHtml"
             ></div>
+
+            <div v-if="report" class="report-card">
+              <span class="report-badge">{{ reportKind }}</span>
+              <div class="report-info">
+                <span class="report-name" :title="report.fileName">{{ report.fileName }}</span>
+                <span class="report-meta">
+                  <template v-if="Number.isFinite(report.rowCount)">
+                    {{ report.rowCount }} 行 ·
+                  </template>
+                  {{ formatFileSize(report.fileSize) }}
+                </span>
+              </div>
+              <button
+                type="button"
+                class="report-download"
+                :disabled="downloading"
+                @click="handleDownloadReport"
+              >
+                {{ downloading ? '下载中…' : '下载 Excel' }}
+              </button>
+            </div>
+
+            <div v-if="template" class="report-card template-card">
+              <span class="report-badge template-badge">{{ templateKind }}</span>
+              <div class="report-info">
+                <span class="report-name" :title="template.templateName">
+                  {{ template.templateName }}
+                </span>
+                <span class="report-meta">
+                  本会话模板
+                  <template v-if="template.sheetSummary"> · {{ template.sheetSummary }}</template>
+                  <template v-else> · {{ formatFileSize(template.fileSize) }}</template>
+                </span>
+              </div>
+              <button
+                type="button"
+                class="report-download"
+                :disabled="downloadingTemplate"
+                @click="handleDownloadTemplate"
+              >
+                {{ downloadingTemplate ? '下载中…' : '下载模板' }}
+              </button>
+            </div>
 
             <ChartPanel
               v-if="charts.length"
@@ -171,7 +227,8 @@ import { ElMessage } from 'element-plus'
 import QueryResultTable from './QueryResultTable.vue'
 import { renderMarkdown } from '../utils/markdown'
 import { exportAnswerPdf } from '../utils/pdf'
-import { formatElapsed, formatTime, statusMeta } from '../utils/format'
+import { formatElapsed, formatFileSize, formatTime, statusMeta } from '../utils/format'
+import { downloadReportFile, downloadReportTemplate } from '../api/report'
 
 // ECharts 体积较大，仅在本次回答包含图表时才加载对应 chunk。
 const ChartPanel = defineAsyncComponent(() => import('./ChartPanel.vue'))
@@ -188,9 +245,13 @@ const reasoningOpen = ref(true)
 const reasoningEl = ref(null)
 const chartPanelRef = ref(null)
 const exporting = ref(false)
+const downloading = ref(false)
+const downloadingTemplate = ref(false)
 
 const response = computed(() => props.message.response || {})
 const isStreaming = computed(() => Boolean(props.message.streaming))
+// 用户主动停止（或连接断开）后由 App.vue 打上 stopped 标记：保留部分内容并单独提示。
+const stopped = computed(() => Boolean(props.message.stopped))
 const reasoningText = computed(() =>
   String(props.message.reasoning || response.value.reasoning || '')
 )
@@ -204,6 +265,22 @@ const warnings = computed(() =>
 const charts = computed(() =>
   Array.isArray(response.value.charts) ? response.value.charts : []
 )
+const report = computed(() => {
+  const value = response.value.report
+  return value && value.fileId ? value : null
+})
+const reportKind = computed(() =>
+  /\.xls$/i.test(report.value?.fileName || '') ? 'XLS' : 'XLSX'
+)
+// 智能报表会话绑定的模板；数据问答消息不会带 template。
+const template = computed(() => {
+  const value = response.value.template
+  return value && value.templateId ? value : null
+})
+const templateKind = computed(() =>
+  /\.xls$/i.test(template.value?.templateName || '') ? 'XLS' : 'XLSX'
+)
+const isReportPending = computed(() => Boolean(props.message.reporting))
 const rowCount = computed(() => {
   const value = response.value.rowCount
   return Number.isFinite(value) ? value : null
@@ -306,6 +383,45 @@ function waitForChartPanel() {
     check()
   })
 }
+
+async function handleDownloadReport() {
+  if (!report.value || downloading.value) {
+    return
+  }
+  downloading.value = true
+  try {
+    await downloadReportFile({
+      fileId: report.value.fileId,
+      fileName: report.value.fileName
+    })
+    ElMessage.success('报表已开始下载')
+  } catch (error) {
+    ElMessage.error(error && error.message ? `下载失败：${error.message}` : '报表下载失败，请稍后重试')
+  } finally {
+    downloading.value = false
+  }
+}
+
+async function handleDownloadTemplate() {
+  if (!template.value || downloadingTemplate.value) {
+    return
+  }
+  downloadingTemplate.value = true
+  try {
+    await downloadReportTemplate({
+      templateId: template.value.templateId,
+      templateName: template.value.templateName
+    })
+    ElMessage.success('模板已开始下载')
+  } catch (error) {
+    ElMessage.error(
+      error && error.message ? `模板下载失败：${error.message}` : '模板下载失败，请稍后重试'
+    )
+  } finally {
+    downloadingTemplate.value = false
+  }
+}
+
 
 async function handleExportPdf() {
   if (exporting.value || !canExport.value) {

@@ -20,6 +20,8 @@ import org.rin.rule.entity.StatRule;
 import org.rin.rule.entity.StatRuleInputField;
 import org.rin.rule.mapper.StatRuleInputFieldMapper;
 import org.rin.rule.mapper.StatRuleMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,8 @@ import java.util.Set;
  */
 @Service
 public class StatRuleService {
+
+    private static final Logger log = LoggerFactory.getLogger(StatRuleService.class);
 
     /** 单次对话最多注入的规则数，避免提示词无限膨胀。 */
     public static final int MAX_RULES_PER_CHAT = 50;
@@ -133,6 +137,7 @@ public class StatRuleService {
         try {
             ruleMapper.insert(rule);
         } catch (DuplicateKeyException e) {
+            log.warn("创建统计规则失败，规则代码重复: ruleCode={}", data.ruleCode(), e);
             throw new BadRequestException("规则代码已存在：" + data.ruleCode());
         }
         insertFields(rule.getId(), data.inputFields(), actor.id(), now);
@@ -161,6 +166,8 @@ public class StatRuleService {
         try {
             ruleMapper.updateById(existing);
         } catch (DuplicateKeyException e) {
+            log.warn("更新统计规则失败，规则代码重复: ruleId={}, ruleCode={}",
+                    ruleId, data.ruleCode(), e);
             throw new BadRequestException("规则代码已存在：" + data.ruleCode());
         }
         inputFieldMapper.delete(new LambdaQueryWrapper<StatRuleInputField>()
@@ -240,6 +247,8 @@ public class StatRuleService {
         try {
             return objectMapper.writeValueAsString(prompts);
         } catch (JsonProcessingException e) {
+            log.error("统计规则序列化失败: source={}, ruleCount={}",
+                    sourceKey, prompts.size(), e);
             throw new IllegalStateException("统计规则序列化失败", e);
         }
     }
@@ -277,6 +286,8 @@ public class StatRuleService {
             try {
                 inputFieldMapper.insert(entity);
             } catch (DuplicateKeyException e) {
+                log.warn("保存统计规则输入字段失败，字段重复: ruleId={}, field={}.{}",
+                        ruleId, field.sourceTable(), field.fieldName(), e);
                 throw new BadRequestException("输入字段重复：" + field.sourceTable()
                         + "." + field.fieldName());
             }

@@ -10,6 +10,8 @@ import net.sf.jsqlparser.statement.select.SelectBody;
 import net.sf.jsqlparser.statement.select.SetOperationList;
 import net.sf.jsqlparser.statement.select.WithItem;
 import org.rin.config.AgentProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -30,6 +32,7 @@ import java.util.regex.Pattern;
 @Component
 public class SqlGuard {
 
+    private static final Logger log = LoggerFactory.getLogger(SqlGuard.class);
     private static final int MAX_STATEMENTS=1;
 
     @Autowired
@@ -123,6 +126,7 @@ public class SqlGuard {
             }
             return statements;
         } catch (JSQLParserException e) {
+            log.warn("SQL 语法无法解析，已拒绝执行: {}", rootMessage(e));
             throw new UnsafeSqlException("SQL 语法无法解析，已拒绝执行: " + rootMessage(e), e);
         }
     }

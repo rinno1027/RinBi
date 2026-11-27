@@ -25,6 +25,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 读取数据库元数据，生成给模型使用的精简 schema 文本，并按配置缓存。
+ *
+ * <p>schema 文本头部标注真实数据库产品（取自 JDBC 元数据），模型据此选择该产品支持的函数，
+ * 避免把其他数据库的专有函数套用过来。</p>
  */
 @Service
 public class SchemaService {
@@ -91,6 +94,7 @@ public class SchemaService {
             try {
                 builder.append(getSchema(userId, definition.getKey()));
             } catch (RuntimeException e) {
+                log.warn("读取数据源 schema 失败，已跳过: database={}", definition.getKey(), e);
                 builder.append("（该数据库 schema 读取失败: ").append(e.getMessage()).append("）");
             }
         }
@@ -117,12 +121,6 @@ public class SchemaService {
         DataSource dataSource = databaseRegistry.getDataSource(database);
         int maxChars = maxSchemaChars();
         StringBuilder out = new StringBuilder();
-        out.append("数据库: ").append(database.getName() == null ? databaseKey : database.getName())
-                .append("（key=").append(databaseKey)
-                .append(", dialect=").append(database.getDialect()).append("）\n");
-        if (StringUtils.hasText(database.getDescription())) {
-            out.append("说明: ").append(database.getDescription()).append("\n");
-        }
 
         Map<String, String> tableComments = new LinkedHashMap<>();
         Map<String, String> qualifiedColumnComments = new LinkedHashMap<>();
@@ -132,6 +130,14 @@ public class SchemaService {
         try (Connection connection = dataSource.getConnection()) {
             setReadOnly(connection);
             DatabaseMetaData metaData = connection.getMetaData();
+            // 数据库产品取自真实连接，配置里的 dialect 可能过期或不准确，不再作为提示依据。
+            out.append("数据库: ").append(database.getName() == null ? databaseKey : database.getName())
+                    .append("（key=").append(databaseKey)
+                    .append(", 产品=").append(metaData.getDatabaseProductName())
+                    .append(' ').append(metaData.getDatabaseProductVersion()).append("）\n");
+            if (StringUtils.hasText(database.getDescription())) {
+                out.append("说明: ").append(database.getDescription()).append("\n");
+            }
             String catalog = safeCatalog(connection);
             List<TableInfo> tables = loadTables(metaData, catalog);
             if (tables.isEmpty()) {
@@ -151,6 +157,7 @@ public class SchemaService {
                     qualifiedColumnComments, columnComments, ambiguousColumns);
             return new CachedSchema(out.toString(), metadata, 0L);
         } catch (SQLException e) {
+            log.error("读取数据库 schema 失败: database={}", databaseKey, e);
             throw new SqlExecutionException("读取数据库 schema 失败（" + databaseKey + "）: "
                     + e.getMessage(), e);
         }
@@ -263,6 +270,7 @@ public class SchemaService {
         try {
             return connection.getCatalog();
         } catch (SQLException e) {
+            log.debug("读取数据库 catalog 失败，按默认值处理: {}", e.getMessage());
             return null;
         }
     }

@@ -11,6 +11,9 @@ import org.rin.auth.AuthUser;
 import org.rin.db.DataSourceDefinition;
 import org.rin.db.DatabaseRegistry;
 import org.rin.exception.BadRequestException;
+import org.rin.exception.ChatCancelledException;
+import org.rin.task.ChatTask;
+import org.rin.task.ChatTaskRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,6 +65,9 @@ public class AgentController {
     private ConversationMemory conversationMemory;
 
     @Autowired
+    private ChatTaskRegistry chatTaskRegistry;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @Autowired
@@ -89,47 +95,98 @@ public class AgentController {
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("X-Accel-Buffering", "no");
 
+        // 一次 SSE 对话对应一个可取消任务：用户点击停止、关闭页面导致连接断开、
+        // 推送失败或连接超时都会取消它，避免继续消耗模型 token 与数据库连接。
+        ChatTask task = chatTaskRegistry.start(userId, prepared.getConversationId());
+
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
         emitter.onTimeout(() -> {
             log.warn("SSE 连接超时: conversation={}", prepared.getConversationId());
-            emitter.complete();
+            chatTaskRegistry.cancel(task);
+            completeQuietly(emitter);
         });
-        emitter.onError(error ->
-                log.debug("SSE 连接异常: conversation={}, error={}",
-                        prepared.getConversationId(), safeMessage(error)));
-
-        streamExecutor.execute(() -> {
-            try {
-                ChatResponse result = agentService.execute(userId, prepared, new ChatStreamListener() {
-                    @Override
-                    public void onMeta(ChatResponse meta) {
-                        sendEvent(emitter, "meta", meta);
-                    }
-
-                    @Override
-                    public void onReasoning(String chunk) {
-                        sendEvent(emitter, "reasoning", chunk);
-                    }
-
-                    @Override
-                    public void onToken(String chunk) {
-                        sendEvent(emitter, "token", chunk);
-                    }
-                });
-                sendEvent(emitter, "done", result);
-            } catch (RuntimeException e) {
-                log.warn("流式对话失败: conversation={}, error={}",
-                        prepared.getConversationId(), safeMessage(e));
-                sendEvent(emitter, "error", ChatStreamError.builder()
-                        .code("ERROR")
-                        .message("处理请求时发生错误，请稍后重试")
-                        .status(500)
-                        .build());
-            } finally {
-                emitter.complete();
-            }
+        emitter.onError(error -> {
+            log.debug("SSE 连接异常: conversation={}, error={}",
+                    prepared.getConversationId(), safeMessage(error));
+            chatTaskRegistry.cancel(task);
         });
+
+        try {
+            streamExecutor.execute(() -> streamChat(userId, prepared, emitter, task));
+        } catch (RuntimeException e) {
+            // 线程池已拒绝（队列与线程都打满）：任务不会执行，必须立即释放注册表句柄。
+            chatTaskRegistry.finish(task);
+            throw e;
+        }
         return emitter;
+    }
+
+    /**
+     * 在线程池中执行一次流式对话。
+     *
+     * <p>任务结束（正常完成、被取消或异常）时一定会解除线程绑定、从注册表移除并关闭 SSE。</p>
+     */
+    private void streamChat(long userId, ChatRequest prepared, SseEmitter emitter, ChatTask task) {
+        task.bind();
+        try {
+            ChatResponse result = agentService.execute(userId, prepared, new ChatStreamListener() {
+                @Override
+                public void onMeta(ChatResponse meta) {
+                    sendOrCancel(emitter, task, "meta", meta);
+                }
+
+                @Override
+                public void onReasoning(String chunk) {
+                    sendOrCancel(emitter, task, "reasoning", chunk);
+                }
+
+                @Override
+                public void onToken(String chunk) {
+                    sendOrCancel(emitter, task, "token", chunk);
+                }
+            }, task);
+            sendEvent(emitter, "done", result);
+        } catch (ChatCancelledException e) {
+            log.info("对话已停止: conversation={}", prepared.getConversationId());
+            // 主动停止时通知前端保留已生成的部分内容；连接已断开时该事件自然发送失败。
+            sendEvent(emitter, "stopped", ChatStreamError.builder()
+                    .code("STOPPED")
+                    .message("已停止生成")
+                    .status(0)
+                    .build());
+        } catch (RuntimeException e) {
+            log.warn("流式对话失败: conversation={}, error={}",
+                    prepared.getConversationId(), safeMessage(e));
+            sendEvent(emitter, "error", ChatStreamError.builder()
+                    .code("ERROR")
+                    .message("处理请求时发生错误，请稍后重试")
+                    .status(500)
+                    .build());
+        } finally {
+            task.unbind();
+            chatTaskRegistry.finish(task);
+            completeQuietly(emitter);
+        }
+    }
+
+    /**
+     * SSE 推送失败说明浏览器已断开：立即取消任务，停止后续的模型调用与 SQL 执行。
+     */
+    private void sendOrCancel(SseEmitter emitter, ChatTask task, String name, Object data) {
+        if (!sendEvent(emitter, name, data)) {
+            chatTaskRegistry.cancel(task);
+        }
+    }
+
+    /**
+     * 关闭 SSE 连接。连接已被容器关闭时忽略重复关闭的异常。
+     */
+    private void completeQuietly(SseEmitter emitter) {
+        try {
+            emitter.complete();
+        } catch (IllegalStateException e) {
+            log.debug("SSE 连接已关闭: {}", safeMessage(e));
+        }
     }
 
     /**
@@ -180,6 +237,26 @@ public class AgentController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * 主动停止一次正在执行的数据问答 / 智能报表。
+     *
+     * <p>前端点击“停止”按钮或关闭页面时调用：后端会中断模型流式调用与数据库查询，
+     * 并关闭对应的 SSE 连接，已生成的部分内容仍保留在前端。接口幂等：
+     * 没有正在执行的任务时同样返回 204。</p>
+     */
+    @PostMapping("/conversations/{conversationId}/stop")
+    public ResponseEntity<Void> stop(
+            @RequestAttribute(AuthService.AUTH_USER_ATTRIBUTE) AuthUser user,
+            @PathVariable String conversationId) {
+        if (conversationId == null || conversationId.length() > 64) {
+            throw new BadRequestException("conversationId 不合法");
+        }
+        boolean cancelled = chatTaskRegistry.cancel(user.id(), conversationId);
+        log.info("停止任务: user={}, conversation={}, cancelled={}",
+                user.id(), conversationId, cancelled);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/health")
     public Map<String, Object> health(HttpServletRequest request) {
         // health 不强制登录：未登录时只返回存活状态，避免泄露数据源信息。
@@ -187,7 +264,7 @@ public class AgentController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", "UP");
         result.put("databases", user == null ? List.of() : databaseRegistry.getKeys(user.id()));
-        result.put("conversations", conversationMemory.size());
+//        result.put("conversations", conversationMemory.size());
         result.put("timestamp", OffsetDateTime.now().format(TIMESTAMP_FORMAT));
         return result;
     }

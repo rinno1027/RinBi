@@ -53,6 +53,7 @@ function parseEventPayload(data) {
  * - reasoning：模型思考过程分片；前端可折叠展示
  * - token：最终答案分片；前端按到达顺序追加，实现边生成边渲染
  * - done：完整 ChatResponse（含 reasoning 与 answer），作为 Promise 的返回值
+ * - stopped：用户主动停止（或服务端判定连接已断开）；已生成的部分内容保留在前端
  * - error：流内异常（ChatStreamError）
  *
  * @param {object} options
@@ -138,6 +139,8 @@ export async function sendQuestion({
     let dataLines = []
     let finalResponse = null
     let streamError = null
+    // 后端主动停止时下发 stopped 事件，用独立标记与真正的错误区分开。
+    let streamStopped = false
 
     const dispatch = (name, data) => {
       const parsed = parseEventPayload(data)
@@ -171,6 +174,10 @@ export async function sendQuestion({
           code: info.code || 'STREAM_ERROR',
           status: Number(info.status) || 0
         })
+        return
+      }
+      if (name === 'stopped') {
+        streamStopped = true
       }
     }
 
@@ -224,6 +231,14 @@ export async function sendQuestion({
       }
       buffer += decoder.decode(value, { stream: true })
       drainBuffer()
+      if (streamStopped) {
+        try {
+          await reader.cancel()
+        } catch (error) {
+          // 流已关闭时 cancel 会抛错，忽略即可。
+        }
+        throw new ApiError('已停止生成', { code: 'STOPPED' })
+      }
       if (streamError) {
         try {
           await reader.cancel()
@@ -236,6 +251,9 @@ export async function sendQuestion({
 
     buffer += decoder.decode()
     drainBuffer(true)
+    if (streamStopped) {
+      throw new ApiError('已停止生成', { code: 'STOPPED' })
+    }
     if (streamError) {
       throw streamError
     }
@@ -271,4 +289,28 @@ export function deleteConversation(conversationId) {
     method: 'DELETE',
     timeout: 10000
   })
+}
+
+/**
+ * 停止会话中正在执行的数据问答 / 智能报表任务。
+ *
+ * <p>用户点击“停止”按钮、关闭页面或切换会话时调用：后端会取消任务，
+ * 中断模型流式调用与数据库查询，并关闭对应的 SSE 连接。接口幂等：
+ * 没有正在执行的任务时同样返回 204。</p>
+ *
+ * @param {string} conversationId 会话 id（数据问答与报表会话通用）
+ * @param {object} [options]
+ * @param {boolean} [options.keepalive] 页面关闭时置为 true，保证请求在页面卸载后仍能发出
+ * @returns {Promise<Response|null>} 请求结果；网络失败时静默返回 null
+ */
+export function stopConversation(conversationId, { keepalive = false } = {}) {
+  if (!conversationId) {
+    return Promise.resolve(null)
+  }
+  const url = `${API_BASE}/api/agent/conversations/${encodeURIComponent(conversationId)}/stop`
+  return fetch(url, {
+    method: 'POST',
+    headers: authHeaders(),
+    keepalive
+  }).catch(() => null)
 }

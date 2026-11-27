@@ -44,6 +44,9 @@ public class AuthInterceptor implements HandlerInterceptor {
             request.setAttribute(AuthService.AUTH_USER_ATTRIBUTE, user);
             return true;
         } catch (UnauthorizedException e) {
+            // 未登录/token 失效是正常的鉴权结果，记录请求路径便于排查，不打印堆栈
+            log.debug("请求认证失败: {} {}, reason={}",
+                    request.getMethod(), request.getRequestURI(), e.getMessage());
             writeUnauthorized(response, e.getMessage());
             return false;
         }

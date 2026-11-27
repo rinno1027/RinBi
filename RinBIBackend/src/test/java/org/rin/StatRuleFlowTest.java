@@ -119,6 +119,11 @@ class StatRuleFlowTest {
     @Test
     void createsListsAndDeletesRuleWithInputFields() throws Exception {
         String ruleCode = uniqueCode("CRUD");
+        // 数据源显示名由管理员维护，这里按当前配置断言，避免本地改名导致用例误报
+        DataSourceConfig demo = dataSourceConfigMapper.selectByDbKey(DEMO_KEY);
+        assertNotNull(demo, "bootstrap 应创建 demo 数据源");
+        String demoName = demo.getName();
+        assertNotNull(demoName);
         Map<String, Object> body = ruleBody(ruleCode, "按地区统计客户数", List.of(
                 field("customer", "region", "所属地区"),
                 field("customer", "id", "客户编号")));
@@ -131,7 +136,7 @@ class StatRuleFlowTest {
                 .andExpect(jsonPath("$.ruleCode").value(ruleCode))
                 .andExpect(jsonPath("$.ruleName").value("按地区统计客户数"))
                 .andExpect(jsonPath("$.dataSourceKey").value(DEMO_KEY))
-                .andExpect(jsonPath("$.dataSourceName").value("演示数据库"))
+                .andExpect(jsonPath("$.dataSourceName").value(demoName))
                 .andExpect(jsonPath("$.versionNo").isNotEmpty())
                 .andExpect(jsonPath("$.canEdit").value(true))
                 .andExpect(jsonPath("$.createdByName").value("admin"))

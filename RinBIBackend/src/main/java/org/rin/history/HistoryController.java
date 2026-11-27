@@ -34,8 +34,9 @@ public class HistoryController {
     @GetMapping("/conversations")
     public List<ConversationSummary> list(
             @RequestAttribute(AuthService.AUTH_USER_ATTRIBUTE) AuthUser user,
-            @RequestParam(name = "limit", defaultValue = "50") int limit) {
-        return historyService.list(user.id(), limit);
+            @RequestParam(name = "limit", defaultValue = "50") int limit,
+            @RequestParam(name = "feature", required = false) String feature) {
+        return historyService.list(user.id(), limit, feature);
     }
 
     @GetMapping("/conversations/{conversationId}")

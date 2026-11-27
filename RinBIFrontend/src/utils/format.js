@@ -1,6 +1,16 @@
 export const STORAGE_KEYS = {
   conversationId: 'rinbi.conversationId',
+  reportConversationId: 'rinbi.reportConversationId',
+  feature: 'rinbi.feature',
   database: 'rinbi.database'
+}
+
+/**
+ * 功能类型：数据问答与智能报表各自维护会话，互不干扰。
+ */
+export const FEATURE = {
+  chat: 'DATA_QA',
+  report: 'REPORT'
 }
 
 const STATUS_META = {
@@ -18,10 +28,12 @@ export function statusMeta(status) {
 /**
  * 生成符合后端 [A-Za-z0-9_-]{1,64} 约束的会话 id。
  * 不使用 crypto.randomUUID，以兼容非 HTTPS 的内网访问环境。
+ *
+ * @param {string} [prefix] 会话前缀：数据问答用 web，智能报表用 rep
  */
-export function createConversationId() {
+export function createConversationId(prefix = 'web') {
   const random = Math.random().toString(36).slice(2, 10)
-  return `web-${Date.now().toString(36)}-${random}`
+  return `${prefix}-${Date.now().toString(36)}-${random}`
 }
 
 export function formatElapsed(milliseconds) {
@@ -66,6 +78,20 @@ export function formatTime(value) {
     second: '2-digit',
     hour12: false
   })
+}
+
+export function formatFileSize(value) {
+  const size = Number(value)
+  if (!Number.isFinite(size) || size < 0) {
+    return '—'
+  }
+  if (size < 1024) {
+    return `${Math.round(size)} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 export function formatCell(value) {

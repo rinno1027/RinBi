@@ -1,8 +1,17 @@
 import { request } from './http'
 
-/** 当前用户的历史会话列表，按最近更新时间倒序。 */
-export function fetchConversations(limit = 50) {
-  return request(`/api/history/conversations?limit=${encodeURIComponent(limit)}`, {
+/**
+ * 当前用户的历史会话列表，按最近更新时间倒序。
+ *
+ * @param {number} [limit] 返回条数
+ * @param {string} [feature] 功能类型：DATA_QA 数据问答 / REPORT 智能报表；留空返回全部
+ */
+export function fetchConversations(limit = 50, feature = '') {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (feature) {
+    query.set('feature', feature)
+  }
+  return request(`/api/history/conversations?${query.toString()}`, {
     timeout: 10000
   })
 }

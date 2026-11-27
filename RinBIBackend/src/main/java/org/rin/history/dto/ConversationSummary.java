@@ -20,7 +20,17 @@ public class ConversationSummary {
 
     private String title;
 
+    /**
+     * 功能类型：DATA_QA 数据问答 / REPORT 智能报表。
+     */
+    private String featureType;
+
     private String datasourceKey;
+
+    /**
+     * 智能报表会话导入的模板名称；数据问答会话为 null。
+     */
+    private String templateName;
 
     /**
      * 该会话包含的问题/答案消息总数。

@@ -171,12 +171,15 @@ CREATE TABLE IF NOT EXISTS chat_conversation (
     user_id         BIGINT       NOT NULL COMMENT '所属用户',
     conversation_id VARCHAR(64)  NOT NULL COMMENT '会话业务 ID',
     title           VARCHAR(200) NOT NULL COMMENT '会话标题（首问摘要）',
+    feature_type    VARCHAR(16)  NOT NULL DEFAULT 'DATA_QA' COMMENT '功能类型：DATA_QA 数据问答 / REPORT 智能报表',
     datasource_key  VARCHAR(64)           DEFAULT NULL COMMENT '最近使用的数据源 key',
+    input_chars     BIGINT       NOT NULL DEFAULT 0 COMMENT '智能报表会话累计占用的模型输入字符数',
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_chat_conversation_user (user_id, conversation_id),
     KEY idx_chat_conversation_updated (user_id, updated_at),
+    KEY idx_chat_conversation_feature (user_id, feature_type, updated_at),
     CONSTRAINT fk_chat_conversation_user FOREIGN KEY (user_id) REFERENCES sys_user (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '历史对话';
 
@@ -192,3 +195,122 @@ CREATE TABLE IF NOT EXISTS chat_message (
     CONSTRAINT fk_chat_message_conversation FOREIGN KEY (conversation_pk)
         REFERENCES chat_conversation (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '历史对话消息';
+
+-- ============================================================
+-- 兼容旧库：chat_conversation 新增 feature_type / input_chars，
+-- 区分「数据问答」与「智能报表」两种功能，并记录报表会话的输入预算消耗。
+-- 所有语句幂等，已存在时直接跳过。
+-- ============================================================
+SET @has_conversation_feature_type = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'chat_conversation'
+      AND COLUMN_NAME = 'feature_type'
+);
+SET @add_conversation_feature_type_sql = IF(@has_conversation_feature_type = 0,
+    'ALTER TABLE chat_conversation ADD COLUMN feature_type VARCHAR(16) NOT NULL DEFAULT ''DATA_QA'' COMMENT ''功能类型：DATA_QA 数据问答 / REPORT 智能报表'' AFTER title',
+    'SELECT 1');
+PREPARE conversation_ddl_stmt FROM @add_conversation_feature_type_sql;
+EXECUTE conversation_ddl_stmt;
+DEALLOCATE PREPARE conversation_ddl_stmt;
+
+SET @has_conversation_input_chars = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'chat_conversation'
+      AND COLUMN_NAME = 'input_chars'
+);
+SET @add_conversation_input_chars_sql = IF(@has_conversation_input_chars = 0,
+    'ALTER TABLE chat_conversation ADD COLUMN input_chars BIGINT NOT NULL DEFAULT 0 COMMENT ''智能报表会话累计占用的模型输入字符数'' AFTER datasource_key',
+    'SELECT 1');
+PREPARE conversation_ddl_stmt FROM @add_conversation_input_chars_sql;
+EXECUTE conversation_ddl_stmt;
+DEALLOCATE PREPARE conversation_ddl_stmt;
+
+SET @has_conversation_feature_index = (
+    SELECT COUNT(*)
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'chat_conversation'
+      AND INDEX_NAME = 'idx_chat_conversation_feature'
+);
+SET @add_conversation_feature_index_sql = IF(@has_conversation_feature_index = 0,
+    'ALTER TABLE chat_conversation ADD KEY idx_chat_conversation_feature (user_id, feature_type, updated_at)',
+    'SELECT 1');
+PREPARE conversation_ddl_stmt FROM @add_conversation_feature_index_sql;
+EXECUTE conversation_ddl_stmt;
+DEALLOCATE PREPARE conversation_ddl_stmt;
+
+-- ============================================================
+-- 智能报表生成文件记录：文件实体保存在 agent.report.storage-dir，
+-- 数据库只保存元信息与归属，下载时按 user_id 严格校验。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS report_file (
+    id              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    user_id         BIGINT       NOT NULL COMMENT '所属用户 sys_user.id',
+    conversation_id VARCHAR(64)           DEFAULT NULL COMMENT '关联会话业务 ID',
+    template_id     BIGINT                DEFAULT NULL COMMENT '生成该文件所用的模板 report_template.id',
+    file_name       VARCHAR(255) NOT NULL COMMENT '下载时展示的文件名',
+    stored_name     VARCHAR(255) NOT NULL COMMENT '存储目录内的文件名',
+    content_type    VARCHAR(128) NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' COMMENT 'MIME 类型',
+    file_size       BIGINT       NOT NULL DEFAULT 0 COMMENT '文件字节数',
+    status          VARCHAR(16)  NOT NULL DEFAULT 'READY' COMMENT 'READY / FAILED',
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_report_file_user (user_id, created_at),
+    CONSTRAINT fk_report_file_user FOREIGN KEY (user_id)
+        REFERENCES sys_user (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '智能报表生成文件';
+
+SET @has_report_file_template_id = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'report_file'
+      AND COLUMN_NAME = 'template_id'
+);
+SET @add_report_file_template_id_sql = IF(@has_report_file_template_id = 0,
+    'ALTER TABLE report_file ADD COLUMN template_id BIGINT DEFAULT NULL COMMENT ''生成该文件所用的模板 report_template.id'' AFTER conversation_id',
+    'SELECT 1');
+PREPARE report_file_ddl_stmt FROM @add_report_file_template_id_sql;
+EXECUTE report_file_ddl_stmt;
+DEALLOCATE PREPARE report_file_ddl_stmt;
+
+-- 兼容旧数据：早期版本生成的报表会话没有 feature_type（默认 DATA_QA），
+-- 这里按 report_file 的关联关系把它们归入「智能报表」历史，避免混进数据问答列表。
+UPDATE chat_conversation c
+SET c.feature_type = 'REPORT'
+WHERE c.feature_type = 'DATA_QA'
+  AND EXISTS (
+      SELECT 1 FROM report_file f
+      WHERE f.conversation_id = c.conversation_id
+        AND f.user_id = c.user_id
+  );
+
+-- ============================================================
+-- 智能报表导入模板：用户上传的 Excel 模板同样落盘保存，
+-- 一个会话（conversation_id）只允许导入一个模板；
+-- plan_json 保存最近一次可用的取数计划，供后续多轮调整复用。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS report_template (
+    id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+    user_id         BIGINT        NOT NULL COMMENT '所属用户 sys_user.id',
+    conversation_id VARCHAR(64)   NOT NULL COMMENT '关联会话业务 ID（一个会话仅允许一个模板）',
+    template_name   VARCHAR(255)  NOT NULL COMMENT '用户上传时的模板文件名',
+    stored_name     VARCHAR(255)  NOT NULL COMMENT '模板存储目录内的文件名',
+    content_type    VARCHAR(128)  NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' COMMENT 'MIME 类型',
+    file_size       BIGINT        NOT NULL DEFAULT 0 COMMENT '文件字节数',
+    sheet_summary   VARCHAR(1024)          DEFAULT NULL COMMENT '模板结构摘要（工作表与已用区域）',
+    plan_json       LONGTEXT               DEFAULT NULL COMMENT '最近一次可用的报表取数计划 JSON',
+    status          VARCHAR(16)   NOT NULL DEFAULT 'READY' COMMENT 'READY / FAILED',
+    created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_report_template_conversation (user_id, conversation_id),
+    KEY idx_report_template_user (user_id, created_at),
+    CONSTRAINT fk_report_template_user FOREIGN KEY (user_id)
+        REFERENCES sys_user (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '智能报表导入模板';
+

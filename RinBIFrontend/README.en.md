@@ -2,7 +2,7 @@
 
 [Chinese](./README.md) | **English**
 
-RinBI Frontend is the web client for the RinBI natural-language data assistant. After signing in, a user selects an authorized data source, asks a question in natural language, and receives a streamed explanation plus a structured result table, optional SQL tracing, and optional ECharts visualizations. The backend owns authentication, SQL safety checks, query execution, conversation persistence, data-source authorization, and statistical rules.
+RinBI Frontend is the web client for the RinBI natural-language data assistant. After signing in, users can switch between two features in the header: **Data Q&A** asks questions in natural language and receives a streamed explanation plus a structured result table, optional SQL tracing, and optional ECharts visualizations; **Intelligent report** uploads an Excel template (persisted on the server and downloadable again), generates an Excel report from a natural-language requirement, and keeps refining that same report conversation — every turn produces a new `.xlsx` file. The two features have independent conversation IDs, history lists, and messages. The backend owns authentication, SQL safety checks, query execution, conversation persistence, data-source authorization, and statistical rules.
 
 This document describes the frontend only. Backend setup and API details are in [RinBIBackend/README.en.md](../RinBIBackend/README.en.md).
 
@@ -18,6 +18,7 @@ This document describes the frontend only. Backend setup and API details are in 
 - [Admin entries](#admin-entries)
 - [Chat and streaming](#chat-and-streaming)
 - [History, data sources, and rules](#history-data-sources-and-rules)
+- [Intelligent reports](#intelligent-reports)
 - [Structured results and charts](#structured-results-and-charts)
 - [PDF export](#pdf-export)
 - [Build and deployment](#build-and-deployment)
@@ -28,10 +29,14 @@ This document describes the frontend only. Backend setup and API details are in 
 ## Features
 
 - Login, self-service registration request, pending-approval messaging, and logout.
+- Header switch between **Data Q&A** and **Intelligent report**, each with its own conversation and history list.
 - SSE chat powered by `fetch` and `ReadableStream`, with live reasoning and answer chunks.
 - Data-source selector with an automatic mode in which the model chooses the database.
 - Per-data-source statistical-rule picker, selected by default and limited to 50 rules.
-- Server-side conversation history with restore and delete actions.
+- Excel template upload persisted on the server, with a template panel, re-download, and “my templates” list.
+- Report conversations that can be adjusted in natural language after generation; one template per conversation.
+- Context-usage indicator and friendly `INPUT_LIMIT` guidance when a report conversation reaches the model input budget.
+- Server-side conversation history with restore and delete actions, filtered by feature type.
 - Structured result tables with pagination and optional SQL tracing.
 - Multiple responsive ECharts charts generated only from allow-listed `ChartSpec` fields.
 - Markdown answers sanitized with DOMPurify; chart JSON is stripped during streaming.
@@ -99,28 +104,29 @@ The frontend reads Vite variables from `.env.local` during development and from 
 
 ```text
 src/
-├─ App.vue                    # Authentication state, chat state, SSE flow, history and workspace layout
+├─ App.vue                    # Authentication, feature switch, chat/report state, SSE flow and layout
 ├─ main.js                    # Vue application entry point
 ├─ api/
 │  ├─ http.js                 # API base URL, JSON request helper, ApiError and 401 handling
 │  ├─ auth.js                 # Registration request, login, current user and logout
 │  ├─ admin.js                # User pagination/approval and data-source CRUD/access APIs
-│  ├─ history.js              # Conversation list, detail and deletion
+│  ├─ history.js              # Conversation list (filtered by DATA_QA / REPORT), detail and deletion
 │  ├─ rules.js                # Rule pagination, detail, options and CRUD
+│  ├─ report.js               # Template upload/download, report conversation turns, report download
 │  └─ agent.js                # Health, data sources, SSE chat and conversation clearing
 ├─ components/
 │  ├─ LoginView.vue           # Login/registration form and validation
 │  ├─ AdminPanel.vue          # Admin user pagination, approval and enable/disable controls
 │  ├─ DataSourcePanel.vue     # Admin data-source CRUD and per-user authorization dialog
 │  ├─ RulePanel.vue           # Rule list, filters, editor and input-field maintenance
-│  ├─ ChatMessage.vue         # One answer, Markdown, charts, table and PDF export action
+│  ├─ ChatMessage.vue         # One answer, Markdown, charts, table, template and report cards
 │  ├─ ChartPanel.vue          # Converts ChartSpec entries into ECharts options
 │  ├─ ChartCanvas.vue         # ECharts instance lifecycle and resize handling
 │  └─ QueryResultTable.vue    # Result table pagination and SQL tracing
-├─ styles/                    # Base, chat, authentication, admin, rule and responsive styles
+├─ styles/                    # Base, chat, authentication, admin, rule, template-panel and responsive styles
 └─ utils/
    ├─ session.js              # localStorage token, authorization headers and 401 event
-   ├─ format.js               # Date, elapsed-time, status and cell formatting
+   ├─ format.js               # Date, elapsed-time, feature type, conversation ID and cell formatting
    ├─ markdown.js             # Markdown rendering, HTML sanitizing and chart-block removal
    └─ pdf.js                  # On-demand PDF export of the answer and charts
 ```
@@ -202,11 +208,11 @@ The client handles stream interruption, timeout, non-2xx responses, and missing 
 
 ### History
 
-- `GET /api/history/conversations?limit=50` loads the current user's recent conversations, newest first.
-- `GET /api/history/conversations/{id}` loads the complete conversation, including user messages and structured assistant responses.
-- `DELETE /api/history/conversations/{id}` deletes the conversation and its messages.
-- Selecting a history item restores Markdown, table, charts, and SQL, and sets the active `conversationId` for follow-up questions.
-- The history list is refreshed after each completed answer. If the previously active conversation no longer exists, it is removed from the list and the chat area is reset.
+- `GET /api/history/conversations?limit=50&feature=DATA_QA` loads the current user's recent conversations for the active feature (`DATA_QA` or `REPORT`). Data Q&A and report conversations never appear in the same list.
+- `GET /api/history/conversations/{id}` loads the complete conversation, including user messages, structured assistant responses, and `featureType`. Report conversations also return `template`, `inputChars`, and `inputLimit`.
+- `DELETE /api/history/conversations/{id}` deletes the conversation and its messages. Deleting a report conversation also removes its template record and template file on the backend.
+- Selecting a history item restores Markdown, table, charts, SQL, and report/template cards, and sets the active conversation ID for the corresponding feature.
+- The history list is refreshed after each completed answer or report. If the previously active conversation no longer exists, it is removed from the list and the chat area is reset.
 
 ### Data sources
 
@@ -225,6 +231,35 @@ The rules page is available to every signed-in user and is always scoped to data
 - Every user may view rules; only administrators see create, edit, and delete actions. The backend `canEdit` flag is for UI state only and does not replace server-side authorization.
 - The chat picker is limited to 50 selected rules. It supports search, select-all, clear-all, and an inline retry state. Selecting rules affects only subsequent questions for the current data source and is not written into conversation history.
 - Rules are not available when the data source is in automatic mode, because a rule belongs to one data source and the model may choose a different one.
+
+## Intelligent reports
+
+Switching the header to **Intelligent report** uses a separate conversation ID (`rep-...`), a separate history list, and the same data-source and statistical-rule pickers.
+
+### Upload and adjust
+
+1. Click **Upload template** (in the empty state or next to the composer) and choose an `.xlsx` / `.xls` file. If the current report conversation already has a template, the app asks for confirmation and starts a new conversation before uploading.
+2. The file is validated (extension, 10MB limit) and sent to `POST /api/report/templates` as `multipart/form-data` with `file` and `conversationId`. The backend persists the template and creates the report conversation.
+3. On success the app silently restores the conversation from the server, so the message area shows the “template imported” message plus a template download card, and the sidebar shows the template name, sheet summary, and context usage.
+4. Describe the requirement and click **Send**. The app calls `POST /api/report/chat` with `conversationId`, `templateId`, `question`, `database`, and `ruleIds`. `ruleIds` is sent only when a data source is explicitly selected.
+5. Report generation reuses the `sending` state: the input, send button, rule picker, and template upload are disabled, and the placeholder message says the model is parsing the template and filling Excel.
+6. The response has the same shape as the chat `done` event plus `template`, `promptChars`, `inputChars`, and `inputLimit`. Report and template downloads fetch a Blob with the bearer token before saving.
+7. Continue sending adjustments after a report is generated (change dimensions, add or remove columns, adjust the calculation rules). Each turn produces a new Excel file, and unchanged parts usually keep their SQL aliases and cell coordinates.
+8. When the backend returns `400 / INPUT_LIMIT`, the page explains that the conversation reached the model input budget and guides the user to upload a new template in a new conversation.
+
+### Template panel
+
+- Shows the template bound to the current conversation, its sheet summary, and `context usage x / y characters`.
+- Supports downloading the current template and lists the user's previously imported templates (`GET /api/report/templates`).
+- One template per conversation: the “change template” action always starts a new conversation and keeps the old one in history.
+
+## Stopping a generation
+
+- While a data Q&A answer or a report is being generated, the send button turns into a **Stop** button (it shows “Stopping…” and is disabled after the click) that calls `POST /api/agent/conversations/{conversationId}/stop` to cancel the server-side task.
+- Data Q&A uses SSE: once the cancellation wins, the backend sends a `stopped` event and `sendQuestion` rejects with an `ApiError` whose `code` is `STOPPED`. Reports use a synchronous endpoint that answers `409` with `code: "STOPPED"`. Both paths mark the assistant message as `stopped` (`markStreamingStopped` for the stream, the `catch` branch for reports).
+- Partially generated content stays on screen: `ChatMessage` renders a **Generation stopped** alert explaining that the turn is not saved to history. The history list is not refreshed, and a cancelled report does not consume the conversation input budget because `inputChars` is only added after a successful generation.
+- Closing the tab, reloading, or unmounting the app triggers `stopOnUnload` through the `beforeunload` listener; it fires the same stop request with `fetch(..., { keepalive: true })` so the backend stops burning model tokens and database connections after the browser is gone.
+- The stop endpoint is idempotent: it answers `204` when the task already finished, and the UI still shows the stopped state. If the turn actually completed at the exact moment of the click, the `done` payload wins and the message is restored to its normal finished state.
 
 ## Structured results and charts
 

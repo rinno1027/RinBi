@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.rin.report.dto.ReportTemplateInfo;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,7 +23,27 @@ public class ConversationDetail {
 
     private String title;
 
+    /**
+     * 功能类型：DATA_QA 数据问答 / REPORT 智能报表。
+     */
+    private String featureType;
+
     private String datasourceKey;
+
+    /**
+     * 智能报表会话导入的模板信息；数据问答会话为 null。
+     */
+    private ReportTemplateInfo template;
+
+    /**
+     * 报表会话已累计占用的输入字符数。
+     */
+    private Long inputChars;
+
+    /**
+     * 报表会话累计输入字符上限。
+     */
+    private Integer inputLimit;
 
     private LocalDateTime createdAt;
 

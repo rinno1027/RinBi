@@ -1,5 +1,7 @@
 package org.rin.auth;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKeyFactory;
@@ -18,6 +20,7 @@ import java.util.Base64;
 @Component
 public class PasswordHasher {
 
+    private static final Logger log = LoggerFactory.getLogger(PasswordHasher.class);
     private static final String ALGORITHM = "PBKDF2WithHmacSHA256";
     private static final String PREFIX = "pbkdf2-sha256";
     private static final int ITERATIONS = 120_000;
@@ -53,6 +56,8 @@ public class PasswordHasher {
             byte[] actual = pbkdf2(rawPassword, salt, iterations);
             return MessageDigest.isEqual(actual, expected);
         } catch (IllegalArgumentException e) {
+            // 存储的摘要格式损坏（例如迭代次数被手工改坏），按密码不匹配处理
+            log.debug("密码摘要格式不合法，按不匹配处理: {}", e.getMessage());
             return false;
         }
     }
@@ -63,6 +68,7 @@ public class PasswordHasher {
             SecretKeyFactory factory = SecretKeyFactory.getInstance(ALGORITHM);
             return factory.generateSecret(spec).getEncoded();
         } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+            log.error("当前 JDK 不支持 PBKDF2-SHA256", e);
             throw new IllegalStateException("当前 JDK 不支持 PBKDF2-SHA256", e);
         } finally {
             spec.clearPassword();

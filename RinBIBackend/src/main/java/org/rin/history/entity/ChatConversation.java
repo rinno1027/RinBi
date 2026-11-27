@@ -26,7 +26,17 @@ public class ChatConversation {
 
     private String title;
 
+    /**
+     * 功能类型：DATA_QA 数据问答 / REPORT 智能报表。
+     */
+    private String featureType;
+
     private String datasourceKey;
+
+    /**
+     * 智能报表会话累计占用的模型输入字符数，用于多轮调整时的输入上限控制。
+     */
+    private Long inputChars;
 
     private LocalDateTime createdAt;
 

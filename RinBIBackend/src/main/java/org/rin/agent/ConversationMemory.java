@@ -1,6 +1,8 @@
 package org.rin.agent;
 
 import org.rin.config.AgentProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,8 @@ import java.util.concurrent.TimeUnit;
  */
 @Service
 public class ConversationMemory {
+
+    private static final Logger log = LoggerFactory.getLogger(ConversationMemory.class);
 
     @Autowired
     private AgentProperties properties;
@@ -125,8 +129,9 @@ public class ConversationMemory {
             long ttlMillis = ttlMinutes() * 60_000L;
             long expireBefore = System.currentTimeMillis() - ttlMillis;
             sessions.entrySet().removeIf(entry -> entry.getValue().lastAccessAt < expireBefore);
-        } catch (RuntimeException ignored) {
-            // 清理线程不应因单次异常退出。
+        } catch (RuntimeException e) {
+            // 清理线程不应因单次异常退出，但必须留下日志
+            log.warn("清理过期会话记忆失败", e);
         }
     }
 

@@ -1,5 +1,7 @@
 package org.rin.security;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -22,6 +24,7 @@ import java.util.Base64;
 @Component
 public class SecretCipher {
 
+    private static final Logger log = LoggerFactory.getLogger(SecretCipher.class);
     private static final String PREFIX = "enc:v1:";
     private static final int IV_BYTES = 12;
     private static final int TAG_BITS = 128;
@@ -36,6 +39,7 @@ public class SecretCipher {
                     .digest(material.getBytes(StandardCharsets.UTF_8));
             this.key = new SecretKeySpec(digest, "AES");
         } catch (Exception e) {
+            log.error("初始化数据源密码加密密钥失败", e);
             throw new IllegalStateException("初始化数据源密码加密密钥失败", e);
         }
     }
@@ -56,6 +60,7 @@ public class SecretCipher {
                     .array();
             return PREFIX + Base64.getEncoder().encodeToString(payload);
         } catch (Exception e) {
+            log.error("数据源密码加密失败", e);
             throw new IllegalStateException("数据源密码加密失败", e);
         }
     }
@@ -75,6 +80,7 @@ public class SecretCipher {
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
         } catch (Exception e) {
+            log.error("数据源密码解密失败，请检查 agent.security.secret 配置", e);
             throw new IllegalStateException("数据源密码解密失败，请检查 agent.security.secret 配置", e);
         }
     }

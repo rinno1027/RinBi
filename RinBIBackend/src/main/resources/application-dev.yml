@@ -29,6 +29,11 @@ spring:
       connection-timeout: 10000
       idle-timeout: 600000
       max-lifetime: 1800000
+  # 智能报表模板上传限制；需与 agent.report.max-upload-bytes 保持一致
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
   # 启动时执行幂等建表脚本；表结构见 src/main/resources/db/rinbidb-schema.sql
   sql:
     init:
@@ -66,11 +71,11 @@ agent:
     # 目前使用 OpenAI 兼容协议，可对接 DeepSeek / Qwen / OpenAI 等
     provider: openai-compatible
     base-url: ${LLM_BASE_URL:https://api.deepseek.com}
-    api-key: ${LLM_API_KEY:your-api-key}
+    api-key: ${LLM_API_KEY:}
     model-name: ${LLM_MODEL_NAME:deepseek-flash}
     # 结果整理阶段使用的模型，思考过程会通过 reasoning 事件流式下发；
     # 留空时回退到 model-name。新版本 DeepSeek 可直接使用 deepseek-flash，
-    # 思考模式由下方的 thinking-type 控制（旧的 deepseek-chat / deepseek-reasoner 已逐步下线）。
+    # 思考模式由下方的 thinking-type 控制
     reasoning-model-name: ${LLM_REASONING_MODEL_NAME:deepseek-flash}
     # 推理强度（DeepSeek: low / high / max），仅对支持 reasoning_effort 的模型生效；
     # 留空则不下发该参数，由服务端默认值决定。
@@ -161,3 +166,29 @@ agent:
     admin-display-name: 管理员
     # 为管理员创建 H2 内存演示库（全局数据源不存在时创建，未授权时补建授权）
     demo-datasource-enabled: true
+
+  # ============================================================
+  # 智能报表：上传 Excel 模板 → 模型生成取数 SQL 与填充映射
+  # → 只读校验并执行 → POI 回填 → 保存到本地目录，按记录下载
+  # ============================================================
+  report:
+    # 生成文件保存目录，相对路径基于应用启动目录
+    storage-dir: ${RINBI_REPORT_DIR:data/reports}
+    # 上传模板大小上限（字节），需与 spring.servlet.multipart 的限制保持一致
+    max-upload-bytes: 10485760
+    # 构造提示词时最多读取的模板行数/列数
+    max-template-rows: 200
+    max-template-columns: 60
+    # 单个表格区域最多回填的数据行数
+    max-fill-rows: 5000
+    # 单次报表最多执行的 SQL 条数
+    max-sql-count: 5
+    # 单轮报表提示词（模板结构 + 表结构 + 历史 + 本轮需求）的最大字符数，
+    # 超过后提示用户精简需求或新建会话；可按模型上下文窗口调整
+    max-prompt-chars: 30000
+    # 同一报表会话累计可用的输入字符预算，超出后必须新建会话并重新上传模板
+    max-conversation-chars: 120000
+    # 生成报表时最多带上的历史问答轮数，避免多轮调整时上下文无限增长
+    history-exchanges: 4
+    # 生成文件保留天数；<=0 表示不自动清理
+    retention-days: 7

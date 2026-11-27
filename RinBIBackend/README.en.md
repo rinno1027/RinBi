@@ -45,6 +45,10 @@ The frontend is documented in [RinBIFrontend/README.en.md](../RinBIFrontend/READ
 - Business display names derived from table/column comments, with stream-safe sanitization.
 - Up to four validated chart specifications per answer; chart data is reused from the result table.
 - Reusable statistical rules that constrain query planning for a specific data source.
+- Intelligent Excel reports: upload a template once per report conversation, then keep refining the report in natural language; every turn produces a new `.xlsx` file.
+- Data Q&A and intelligent reports are fully separated by `chat_conversation.feature_type` (`DATA_QA` / `REPORT`), with independent conversation IDs, history lists, and messages.
+- Uploaded templates are persisted on the server and can be re-downloaded by their owner; templates and generated files are always scoped to `user_id`.
+- Prompt-budget guards per turn (`agent.report.max-prompt-chars`) and per conversation (`agent.report.max-conversation-chars`); exceeding them returns `400 / INPUT_LIMIT`.
 - Idempotent bootstrap of a default administrator and an H2 demo database.
 - Server-Sent Events for reasoning and answer streaming.
 
@@ -340,10 +344,12 @@ The metadata schema is defined in `src/main/resources/db/rinbidb-schema.sql` and
 | `sys_user` | Account, PBKDF2 hash, role, and status (`0` disabled/rejected, `1` active, `2` pending approval). |
 | `data_source` | Global query data-source configuration; the password is encrypted at rest. |
 | `user_data_source` | Grant relationship between users and data sources. |
-| `chat_conversation` | Conversation title, most recent data source, and timestamps. |
+| `chat_conversation` | Conversation title, `feature_type` (`DATA_QA` / `REPORT`), most recent data source, accumulated model input characters for report conversations, and timestamps. |
 | `chat_message` | User question or assistant response JSON. |
 | `stat_rule` | Reusable statistical rule for one data source. |
 | `stat_rule_input_field` | Tables and fields used by a rule, deleted with the rule. |
+| `report_template` | Imported Excel template for an intelligent report conversation: display name, stored file name, sheet summary, latest execution plan, and owner. One template per conversation. |
+| `report_file` | Metadata and ownership of generated report files, including the originating `template_id`; the binary lives under `agent.report.storage-dir`. |
 
 Important `data_source` fields:
 
@@ -355,12 +361,14 @@ Important `data_source` fields:
 | `jdbc_url`, `jdbc_params` | Full JDBC URL and optional parameters. A non-empty URL takes precedence over assembled parts. |
 | `driver_class_name` | Optional driver override; otherwise inferred from the type. |
 | `username`, `password` | Credentials; the password is encrypted before storage. |
-| `dialect` | Dialect hint passed to the model, for example `mysql`, `postgresql`, or `h2`. |
+| `dialect` | Dialect hint such as `mysql`, `postgresql`, or `h2`. Informational only; it is not used for prompt construction. |
 | `read_only`, `max_pool_size`, `connection_timeout_millis` | Pool and read-only settings. |
 | `init_script` | Optional classpath-relative initialization script, such as `db/demo.sql`. |
 | `enabled` | Whether the source is available for authorization and querying. |
 
 The startup script also migrates a legacy `user_data_source` table that stored connection columns directly. It moves connection data into `data_source` and preserves user grants. Review the script before running it against a database with custom changes.
+
+No manual dialect upkeep is required. Each schema text starts with the real database product read from JDBC metadata (for example `H2 2.3.232`), and the planning prompts require the model to use only syntax and functions supported by that product. A stale or incorrect `dialect` value therefore cannot make the model emit MySQL-only calls such as `DATE_FORMAT` against the H2 demo database.
 
 ## Authentication and authorization
 
@@ -441,6 +449,7 @@ Except for registration, login, and health, every endpoint requires an authentic
 | `GET` | `/databases` | List the current user's enabled and authorized data sources without credentials. |
 | `POST` | `/chat` | Ask a question. Returns `text/event-stream`; accepts optional `database`, `conversationId`, and `ruleIds`. |
 | `DELETE` | `/conversations/{conversationId}` | Clear the in-memory conversation state and return `204`. |
+| `POST` | `/conversations/{conversationId}/stop` | Cancel the turn currently running for that conversation (streaming answer or report generation). Idempotent: returns `204` when nothing is running. |
 
 Chat request:
 
@@ -459,9 +468,36 @@ Chat request:
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/conversations?limit=50` | List the current user's conversations, newest first. |
-| `GET` | `/conversations/{conversationId}` | Return a conversation with messages and structured assistant responses. |
-| `DELETE` | `/conversations/{conversationId}` | Delete the conversation and its messages, then clear its memory state. Returns `204`. |
+| `GET` | `/conversations?limit=50&feature=REPORT` | List the current user's conversations, newest first. `feature` is `DATA_QA` or `REPORT`; omit it to return both. |
+| `GET` | `/conversations/{conversationId}` | Return a conversation with messages, structured assistant responses, and `featureType`. Report conversations also include `template`, `inputChars`, and `inputLimit`. |
+| `DELETE` | `/conversations/{conversationId}` | Delete the conversation and its messages, then clear its memory state. Report conversations also delete the template row and template file. Returns `204`. |
+
+### Intelligent reports (`/api/report`)
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/templates` | `multipart/form-data` with `file` (`.xlsx` / `.xls`, max 10MB) and optional `conversationId`. Persists the template, creates the report conversation, and returns `templateId`, `templateName`, `downloadUrl`, and `sheetSummary`. Re-uploading for the same conversation returns `400`. |
+| `GET` | `/templates` | List templates imported by the current user so they can be downloaded again. |
+| `GET` | `/templates/{templateId}` | Download a template. Only the owner can access it; missing records or files return `404`. |
+| `POST` | `/chat` | JSON body with `conversationId` (required), optional `templateId`, `question`, `database`, and `ruleIds`. Generates or adjusts the report and returns a `ChatResponse` containing `report`, `template`, `promptChars`, `inputChars`, and `inputLimit`. Exceeding the input budget returns `400 / INPUT_LIMIT`. |
+| `POST` | `/generate` | Legacy one-shot endpoint: equivalent to `POST /templates` followed by `POST /chat`. The template is still persisted and a report conversation is created. |
+| `GET` | `/files/{fileId}` | Download a generated report file. Only the owner can access it; missing records or files return `404`. |
+
+**Report flow**
+
+1. Upload a template (`POST /templates`) — it is parsed with Apache POI and written to `<storage-dir>/templates`, and the metadata row is inserted into `report_template`.
+2. Send a requirement (`POST /chat`) — the prompt contains the database schema, the template structure, the last `agent.report.history-exchanges` exchanges, and the previous plan stored in `report_template.plan_json`.
+3. The model returns a complete `ReportPlan` (`sqls`, `cells`, `tables`, `summary`, `feasible`). Every SQL statement is validated again and executed through `QueryExecutor`; coordinates, sheet names, column names, and merged regions are re-checked before POI fills the template.
+4. Each successful turn writes a new `report_file` row (`template_id` records the source template), updates `plan_json`, and adds `promptChars` to `chat_conversation.input_chars`.
+5. Templates and generated files are per-user resources; download URLs always require the bearer token, so the frontend fetches a Blob first.
+
+**Prompt budget**
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `agent.report.max-prompt-chars` | `30000` | Maximum characters for a single report prompt (template + schema + history + requirement). |
+| `agent.report.max-conversation-chars` | `120000` | Cumulative input budget for one report conversation. When exhausted, users must start a new conversation and upload the template again. |
+| `agent.report.history-exchanges` | `4` | Number of recent exchanges included in the report prompt. |
 
 ### Administrator (`/api/admin`, `ADMIN` only)
 
@@ -539,6 +575,7 @@ Common status codes:
 | `401` | `UNAUTHORIZED` | Missing, expired, or revoked token. |
 | `403` | `FORBIDDEN` | Insufficient role or data-source access. |
 | `404` | `NOT_FOUND` | Requested user, data source, rule, or conversation was not found. |
+| `409` | `STOPPED` | The turn was cancelled through `POST /api/agent/conversations/{conversationId}/stop`. Synchronous endpoints (for example `POST /api/report/chat`) answer `409`; the SSE endpoint emits a `stopped` event instead. |
 | `500` | `SQL_EXECUTION_ERROR`, `INTERNAL_ERROR` | Query execution or unexpected server failure. |
 | `503` | `SERVER_BUSY` | The streaming executor rejected the request. |
 
@@ -552,9 +589,16 @@ Common status codes:
 | `reasoning` | JSON string containing a reasoning chunk | Zero or more events. |
 | `token` | JSON string containing an answer chunk | Zero or more events. The final answer is assembled from these chunks. |
 | `done` | Complete `ChatResponse` | Always the final successful event, including failures represented as a response status. |
+| `stopped` | `ChatStreamError` with `code: "STOPPED"` | The turn was cancelled by the user (or the connection was judged dead). The emitter is closed right after this event; the partial answer is not persisted and the turn is not written to memory or history. |
 | `error` | `ChatStreamError` with `code`, `message`, and `status` | Used for an unexpected failure inside the stream. |
 
 SSE `data` fields are serialized as JSON strings so newlines inside chunks cannot corrupt the event framing. Empty reasoning or token chunks are not sent.
+
+**Cancellation**
+
+Each running turn is registered as a `ChatTask` in `ChatTaskRegistry` (keyed by `user + conversationId`), exposed to the agent pipeline through a `ThreadLocal` so `QueryExecutor` and `LlmService` can check it without extra parameters. Cancelling performs three things: it flags the task, cancels the in-flight JDBC `Statement`, and, before and after every model call, throws `ChatCancelledException` so repair/format/fill phases do not start new model requests. A broken SSE connection (`onError`/`onCompletion` with an unfinished task) triggers the same cancellation, so closing the browser tab also stops the backend work.
+
+Because LangChain4j's streaming client exposes no cancellation hook, the provider may finish the reply already in flight; after cancellation the backend ignores further chunks, never accumulates them, and never issues new model calls. Cancelled turns skip `HistoryService` and `ConversationMemory` writes and do not consume the report input budget.
 
 `ChatResponse` fields:
 
@@ -639,6 +683,7 @@ src/main/java/org/rin/
 ├─ config/                   # Configuration properties, LLM, CORS, bootstrap, stream executor
 ├─ db/                       # Data-source registry, schema metadata, SQL guard and query execution
 ├─ history/                  # Conversation and message persistence and history DTOs
+├─ report/                   # Excel reports: template store, plan validation, POI filling, file records
 ├─ rule/                     # Statistical-rule service, entities, mappers and DTOs
 ├─ security/                 # AES-GCM encryption for data-source passwords
 ├─ exception/                # Business exceptions
@@ -654,7 +699,8 @@ src/main/resources/
 │  └─ postgres-stock-testdata.sql
 └─ prompts/
    ├─ plan-system.txt        # Query-planning system prompt
-   └─ format-system.txt      # Answer-formatting system prompt
+   ├─ format-system.txt      # Answer-formatting system prompt
+   └─ report-system.txt      # Excel report planning (create and adjust) system prompt
 
 src/test/
 ├─ java/org/rin/             # Flow tests and unit tests

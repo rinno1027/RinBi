@@ -267,6 +267,7 @@ public class ChartSpecParser {
         try {
             return new BigDecimal(text);
         } catch (NumberFormatException e) {
+            log.debug("图表数值解析失败，按非数值处理: value={}", value);
             return null;
         }
     }

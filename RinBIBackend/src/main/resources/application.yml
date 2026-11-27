@@ -1,6 +1,7 @@
 spring:
   application:
     name: rinbi-backend
+  # 默认以 dev profile 启动；生产环境通过 SPRING_PROFILES_ACTIVE 覆盖。
+  # 测试同样依赖该 profile 提供元数据库与模型配置。
   profiles:
     active: dev
-

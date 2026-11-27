@@ -482,6 +482,85 @@
   }
 }
 
+/* ---------------- Excel report ---------------- */
+.report-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid #d9e7fb;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f6faff, #eef5ff);
+}
+
+.report-badge {
+  flex: none;
+  padding: 5px 8px;
+  border-radius: 9px;
+  background: #1f8f5f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.report-info {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.report-name {
+  overflow: hidden;
+  color: #233b63;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-meta {
+  color: #7c8ca3;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-download {
+  flex: none;
+  padding: 6px 13px;
+  border: 1px solid #b9d3f6;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.report-download:hover:not(:disabled) {
+  border-color: #8fb8f1;
+  background: #eef5ff;
+}
+
+.report-download:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* 报表会话模板卡片：与报表文件卡片区分颜色 */
+.template-card {
+  border-color: #e6dcf7;
+  background: linear-gradient(135deg, #faf7ff, #f1ecff);
+}
+
+.template-badge {
+  background: #6d54c8;
+}
+
 /* ---------------- PDF export ---------------- */
 .answer-actions {
   display: flex;
